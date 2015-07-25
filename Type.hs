@@ -5,29 +5,31 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
+import           Data.Set (Set)
 import           Prelude.Compat hiding (abs)
 
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
-import           Control.Monad
+import           Control.Lens.Tuple
+import           Control.Monad (unless, (>=>))
 import           Control.Monad.ST (ST, runST)
-import           Control.Monad.State
+import           Control.Monad.State (StateT, evalStateT, modify, get)
+import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.Either
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
-import           Data.STRef
+import qualified Data.Set as Set
 import           Text.PrettyPrint.HughesPJClass
+import           UF (UF)
+import qualified UF as UF
 
 newtype TVarName = TVarName { _tVarName :: Int }
-    deriving (Eq, Show, Pretty)
-
-Lens.makeLenses ''TVarName
+    deriving (Eq, Ord, Show, Pretty)
 
 data Type t
     = TFun !t !t
     | TInst String
-    | TVar {-# UNPACK #-}!TVarName
     deriving (Show, Functor, Foldable, Traversable)
 
 instance Pretty t => Pretty (Type t) where
@@ -36,7 +38,6 @@ instance Pretty t => Pretty (Type t) where
         TFun a b ->
             prettyParen (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
-        TVar name -> "a" <> pPrint name
         TInst name -> "#" <> text name
 
 data Leaf
@@ -58,8 +59,14 @@ data Val v
 newtype V = V (Val V)
     deriving (Show)
 
-newtype T = T (Type T)
-    deriving (Show, Pretty)
+data T
+    = T (Type T)
+    | TVar (Set TVarName)
+    deriving (Show)
+
+instance Pretty T where
+    pPrintPrec level prec (T typ) = pPrintPrec level prec typ
+    pPrintPrec _ _ (TVar names) = text "a" <> pPrint (Set.findMin names)
 
 lam :: String -> V -> V
 lam name body = V $ BLam $ Abs name body
@@ -70,24 +77,22 @@ apply f a = V $ BApp $ App f a
 var :: String -> V
 var = V . BLeaf . Var
 
-newtype Context = Context
-    { _cFresh :: TVarName
-    } deriving (Show, Pretty)
-
 data Err
     = DoesNotUnify
     | VarNotInScope String
+    | OccursCheck
     deriving (Show)
 
 instance Pretty Err where
     pPrint DoesNotUnify = "DoesNotUnify"
     pPrint (VarNotInScope name) = text name <+> "not in scope!"
+    pPrint OccursCheck = "OccursCheck"
 
-newtype Infer s a = Infer { unInfer :: StateT Context (EitherT Err (ST s)) a }
+newtype Infer s a = Infer { unInfer :: StateT Int (EitherT Err (ST s)) a }
     deriving (Functor, Applicative, Monad)
 
 runInfer :: (forall s. Infer s a) -> Either Err a
-runInfer act = runST $ runEitherT $ (`evalStateT` Context (TVarName 0)) $ unInfer $ act
+runInfer act = runST $ runEitherT $ (`evalStateT` 0) $ unInfer $ act
 
 liftST :: ST s a -> Infer s a
 liftST = Infer . lift . lift
@@ -95,34 +100,40 @@ liftST = Infer . lift . lift
 throwError :: Err -> Infer s a
 throwError = Infer . lift . left
 
-Lens.makeLenses ''Context
 Lens.makePrisms ''Type
 
-newtype TS s = TS (STRef s (Type (TS s)))
+data TVWrap s = TVWrap
+    { tvWrapNames :: Set TVarName
+    , tvWrapType :: Maybe (Type (TS s))
+    }
+
+newtype TS s = TS { tsUF :: UF s (TVWrap s) }
 
 type Scope s = Map String (TS s)
 
-wrap :: Type (TS s) -> Infer s (TS s)
-wrap typ = newSTRef typ <&> TS & liftST
-
-unwrap :: TS s -> Infer s (Type (TS s))
-unwrap (TS r) = readSTRef r & liftST
-
-deref :: TS s -> Infer s T
-deref ts = ts & unwrap >>= traverse %%~ deref <&> T
-
-ref :: T -> Infer s (TS s)
-ref = undefined
-
 freshTVarName :: Infer s TVarName
-freshTVarName =
-    Infer $
-    do
-        cFresh . tVarName += 1
-        Lens.use cFresh
+freshTVarName = modify (+1) >> get <&> TVarName & Infer
 
 freshTVar :: Infer s (TS s)
-freshTVar = freshTVarName <&> TVar >>= wrap
+freshTVar =
+    freshTVarName <&> Set.singleton <&> flip TVWrap Nothing
+    >>= liftST . UF.new <&> TS
+
+wrap :: Type (TS s) -> Infer s (TS s)
+wrap typ = TVWrap Set.empty (Just typ) & UF.new <&> TS & liftST
+
+getWrapper :: TS s -> Infer s (TVWrap s)
+getWrapper (TS r) = UF.find r & liftST
+
+deref :: TS s -> Infer s T
+deref ts =
+    ts & getWrapper >>= \(TVWrap names typ) ->
+    case typ of
+    Nothing -> return $ TVar names
+    Just t -> t & traverse %%~ deref <&> T
+
+-- ref :: T -> Infer s (TS s)
+-- ref = undefined
 
 unifyMatch :: v -> Lens.Getting (Monoid.First a) v a -> Infer s a
 unifyMatch vTyp prism =
@@ -136,28 +147,37 @@ unifyMatchEq vTyp u prism =
         v <- unifyMatch vTyp prism
         unless (u == v) $ throwError DoesNotUnify
 
-varBind :: TVarName -> Type t -> Infer s ()
-varBind name typ =
-    unifyMatchEq typ name _TVar
+occursCheck :: Set TVarName -> TVWrap s -> Infer s ()
+occursCheck uNames = go
+    where
+        go (TVWrap vNames mTyp)
+            | Set.null (uNames `Set.intersection` vNames) =
+                  mTyp
+                  & Lens.traverseOf_ (Lens._Just . traverse)
+                    (getWrapper >=> go)
+            | otherwise = throwError OccursCheck
 
 unify :: TS s -> TS s -> Infer s ()
 unify u v =
-    do
-        uTyp <- unwrap u
-        vTyp <- unwrap v
-        let getV = unifyMatch vTyp
-        case (uTyp, vTyp) of
-            (TVar uName, _) -> varBind uName vTyp
-            (_, TVar vName) -> varBind vName uTyp
-            (TInst uName, _) ->
-                do
-                    vName <- getV _TInst
-                    unless (uName == vName) $ throwError $ DoesNotUnify
-            (TFun uArg uRes, _) ->
-                do
-                    (vArg, vRes) <- getV _TFun
+    UF.union f (tsUF u) (tsUF v)
+    & liftST
+    >>= maybe (return ()) id
+    where
+        f uw@(TVWrap uNames uMTyp) vw@(TVWrap vNames vMTyp) =
+            case (uMTyp, vMTyp) of
+            (Nothing, Nothing) -> (Nothing, return ())
+            (Nothing, Just y) -> (Just y, occursCheck uNames vw)
+            (Just x, Nothing) -> (Just x, occursCheck vNames uw)
+            (Just (TInst uName), Just vTyp) ->
+                (uMTyp, unifyMatchEq vTyp uName _TInst)
+            (Just (TFun uArg uRes), Just vTyp) ->
+                ( uMTyp
+                , do
+                    (vArg, vRes) <- unifyMatch vTyp _TFun
                     unify uArg vArg
                     unify uRes vRes
+                )
+            & _1 %~ TVWrap (uNames `Set.union` vNames)
 
 inferLeaf :: Map String a -> Leaf -> Infer s a
 inferLeaf scope leaf =
