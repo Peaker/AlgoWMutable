@@ -20,53 +20,59 @@ instance Monoid (LenList a) where
     mappend (LenList s0 l0) (LenList s1 l1) =
         LenList (s0+s1) (l0 ++ l1)
 
-data Group s a = Group
-    { groupElements :: {-# UNPACK #-}!(STRef s (LenList (UF s a)))
+data GroupVal s a = GroupVal
+    { groupTotal :: a
+    , groupElements :: LenList (UF s a)
+    }
+instance Monoid a => Monoid (GroupVal s a) where
+    mempty = GroupVal mempty mempty
+    mappend (GroupVal t0 e0) (GroupVal t1 e1) =
+        GroupVal (mappend t0 t1) (mappend e0 e1)
+
+newtype Group s a = Group
+    { groupData :: STRef s (GroupVal s a)
     } deriving (Eq)
 
-data UF s a = UF
-    { ufData :: !a
-    , ufGroup :: {-# UNPACK #-}!(STRef s (Group s a))
+newtype UF s a = UF
+    { ufGroup :: STRef s (Group s a)
     }
-
-addGroup :: Group s a -> UF s a -> ST s ()
-addGroup group uf = modifySTRef (groupElements group) $ prepend uf
 
 new :: a -> ST s (UF s a)
 new x =
     do
-        group <- newSTRef mempty <&> Group
-        uf <- newSTRef group <&> UF x
-        addGroup group uf
+        group <- newSTRef (GroupVal x mempty) <&> Group
+        uf <- newSTRef group <&> UF
+        modifySTRef (groupData group) $
+            \(GroupVal t ufs) -> GroupVal t (prepend uf ufs)
         return uf
 
 setGroup :: Group s a -> UF s a -> ST s ()
 setGroup g u = writeSTRef (ufGroup u) g
 
-unifyGroup :: Group s a -> Group s a -> LenList (UF s a) -> ST s ()
-unifyGroup big small smallElems =
+unifyGroup ::
+    Monoid a => Group s a -> Group s a -> GroupVal s a -> ST s ()
+unifyGroup big small smallVal =
     do
-        mapM_ (setGroup big) $ lenListElems smallElems
-        writeSTRef (groupElements small) $ error "Nobody should refer here!"
-        modifySTRef (groupElements big) $ mappend smallElems
+        mapM_ (setGroup big) $ lenListElems $ groupElements smallVal
+        writeSTRef (groupData small) $ error "Dead group"
+        modifySTRef (groupData big) $ mappend smallVal
 
-union :: UF s a -> UF s a -> ST s ()
+union :: Monoid a => UF s a -> UF s a -> ST s ()
 union a b =
     do
         aGroup <- readSTRef (ufGroup a)
         bGroup <- readSTRef (ufGroup b)
-        aElements <- readSTRef $ groupElements aGroup
-        bElements <- readSTRef $ groupElements bGroup
+        aVal <- readSTRef $ groupData aGroup
+        bVal <- readSTRef $ groupData bGroup
         when (aGroup /= bGroup) $
-            if lenList aElements >= lenList bElements
-            then unifyGroup aGroup bGroup bElements
-            else unifyGroup bGroup aGroup aElements
+            if lenList (groupElements aVal) >= lenList (groupElements bVal)
+            then unifyGroup aGroup bGroup bVal
+            else unifyGroup bGroup aGroup aVal
 
-find :: UF s a -> ST s [a]
+find :: UF s a -> ST s a
 find u =
     ufGroup u
     & readSTRef
-    <&> groupElements
+    <&> groupData
     >>= readSTRef
-    <&> lenListElems
-    <&> map ufData
+    <&> groupTotal
