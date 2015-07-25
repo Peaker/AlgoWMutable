@@ -3,11 +3,11 @@ module UF
     , new, union, find
     ) where
 
+import Prelude.Compat
+
 import Control.Lens.Operators
-import Control.Monad (when)
 import Control.Monad.ST (ST)
 import Data.STRef
-import Prelude.Compat
 
 data LenList a = LenList
     { lenList :: {-# UNPACK #-}!Int
@@ -24,10 +24,6 @@ data GroupVal s a = GroupVal
     { groupTotal :: a
     , groupElements :: LenList (UF s a)
     }
-instance Monoid a => Monoid (GroupVal s a) where
-    mempty = GroupVal mempty mempty
-    mappend (GroupVal t0 e0) (GroupVal t1 e1) =
-        GroupVal (mappend t0 t1) (mappend e0 e1)
 
 newtype Group s a = Group
     { groupData :: STRef s (GroupVal s a)
@@ -50,24 +46,28 @@ setGroup :: Group s a -> UF s a -> ST s ()
 setGroup g u = writeSTRef (ufGroup u) g
 
 unifyGroup ::
-    Monoid a => Group s a -> Group s a -> GroupVal s a -> ST s ()
-unifyGroup big small smallVal =
+    (a -> a -> (a, b)) -> Group s a -> GroupVal s a -> Group s a -> GroupVal s a -> ST s b
+unifyGroup unify big (GroupVal bigTotal bigElems) small smallVal =
     do
         mapM_ (setGroup big) $ lenListElems $ groupElements smallVal
         writeSTRef (groupData small) $ error "Dead group"
-        modifySTRef (groupData big) $ mappend smallVal
+        let (newTotal, res) = unify bigTotal (groupTotal smallVal)
+        writeSTRef (groupData big) $
+            GroupVal newTotal $ mappend bigElems $ groupElements smallVal
+        return res
 
-union :: Monoid a => UF s a -> UF s a -> ST s ()
-union a b =
+union :: (a -> a -> (a, b)) -> UF s a -> UF s a -> ST s (Maybe b)
+union unify a b =
     do
         aGroup <- readSTRef (ufGroup a)
         bGroup <- readSTRef (ufGroup b)
         aVal <- readSTRef $ groupData aGroup
         bVal <- readSTRef $ groupData bGroup
-        when (aGroup /= bGroup) $
+        if aGroup == bGroup then return Nothing
+            else Just <$>
             if lenList (groupElements aVal) >= lenList (groupElements bVal)
-            then unifyGroup aGroup bGroup bVal
-            else unifyGroup bGroup aGroup aVal
+            then unifyGroup unify aGroup aVal bGroup bVal
+            else unifyGroup unify bGroup bVal aGroup aVal
 
 find :: UF s a -> ST s a
 find u =
