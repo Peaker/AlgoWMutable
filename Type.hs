@@ -1,10 +1,12 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TemplateHaskell #-}
 import           Data.String (IsString(..))
 import           Data.Set (Set)
 import           Prelude.Compat hiding (abs)
@@ -21,23 +23,46 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
 import qualified Data.Set as Set
-import           Text.PrettyPrint.HughesPJClass (Pretty(..), prettyParen, (<+>), (<>), text, Doc)
+import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens, (<+>), (<>), text, Doc)
 import           UF (UF)
 import qualified UF as UF
 
 newtype TVarName = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty)
 
-data Type t
-    = TFun !t !t
-    | TInst String
-    deriving (Show, Functor, Foldable, Traversable)
+data TType
+type Type = TypeAST TType
 
-instance Pretty t => Pretty (Type t) where
+data TypeAST tag t where
+    TFun :: !t -> !t -> Type t
+    TInst :: String -> Type t
+
+_TFun :: Lens.Prism (Type a) (Type b) (a, a) (b, b)
+_TFun = Lens.prism (uncurry TFun) $ \case
+    TInst n -> Left (TInst n)
+    TFun x y -> Right (x, y)
+
+_TInst :: Lens.Prism' (Type a) String
+_TInst = Lens.prism' TInst $ \case
+    TInst n -> Just n
+    _ -> Nothing
+
+deriving instance Show t => Show (TypeAST tag t)
+instance Functor (TypeAST tag) where
+    fmap f (TFun x y) = TFun (f x) (f y)
+    fmap _ (TInst n) = TInst n
+instance Foldable (TypeAST tag) where
+    foldMap f (TFun x y) = f x `mappend` f y
+    foldMap _ (TInst _) = mempty
+instance Traversable (TypeAST tag) where
+    sequenceA (TFun x y) = TFun <$> x <*> y
+    sequenceA (TInst n) = pure (TInst n)
+
+instance Pretty t => Pretty (TypeAST tag t) where
     pPrintPrec level prec t =
         case t of
         TFun a b ->
-            prettyParen (prec > 0) $
+            maybeParens (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
         TInst name -> "#" <> text name
 
@@ -101,8 +126,6 @@ liftST = Infer . lift . lift
 
 throwError :: Err -> Infer s a
 throwError = Infer . lift . left
-
-Lens.makePrisms ''Type
 
 data TVWrap s = TVWrap
     { tvWrapNames :: Set TVarName
