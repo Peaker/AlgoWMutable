@@ -31,16 +31,20 @@ newtype TVarName = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty)
 
 data TType
+data TRecord
 type Type = TypeAST TType
+type Record = TypeAST TRecord
 
 data TypeAST tag t where
     TFun :: !t -> !t -> Type t
     TInst :: String -> Type t
+    TEmptyRecord :: Record t
+    TRecExtend :: String -> Type t -> Record t -> Record t
 
-_TFun :: Lens.Prism (Type a) (Type b) (a, a) (b, b)
-_TFun = Lens.prism (uncurry TFun) $ \case
-    TInst n -> Left (TInst n)
-    TFun x y -> Right (x, y)
+_TFun :: Lens.Prism' (Type a) (a, a)
+_TFun = Lens.prism' (uncurry TFun) $ \case
+    TFun x y -> Just (x, y)
+    _ -> Nothing
 
 _TInst :: Lens.Prism' (Type a) String
 _TInst = Lens.prism' TInst $ \case
@@ -48,23 +52,19 @@ _TInst = Lens.prism' TInst $ \case
     _ -> Nothing
 
 deriving instance Show t => Show (TypeAST tag t)
-instance Functor (TypeAST tag) where
-    fmap f (TFun x y) = TFun (f x) (f y)
-    fmap _ (TInst n) = TInst n
-instance Foldable (TypeAST tag) where
-    foldMap f (TFun x y) = f x `mappend` f y
-    foldMap _ (TInst _) = mempty
-instance Traversable (TypeAST tag) where
-    sequenceA (TFun x y) = TFun <$> x <*> y
-    sequenceA (TInst n) = pure (TInst n)
+deriving instance Functor (TypeAST tag)
+deriving instance Foldable (TypeAST tag)
+deriving instance Traversable (TypeAST tag)
 
 instance Pretty t => Pretty (TypeAST tag t) where
-    pPrintPrec level prec t =
-        case t of
+    pPrintPrec level prec ast =
+        case ast of
         TFun a b ->
             maybeParens (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
         TInst name -> "#" <> text name
+        TEmptyRecord -> "{}"
+        TRecExtend n t r -> "{" <+> text n <+> ":" <+> pPrint t <+> "} :" <+> pPrint r
 
 data Leaf
     = Var String
