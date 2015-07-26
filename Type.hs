@@ -9,12 +9,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE RankNTypes #-}
-module Type
+module Main
     ( Infer, runInfer
     , TypeAST(..), bitraverse, typeSubexprs
     , Err(..)
+    , V(..), lam, ($$), emptyRec, ($=)
     , infer
-    , example
+    , example, example2
+    , main
     ) where
 
 import           Prelude.Compat hiding (abs)
@@ -150,6 +152,12 @@ lam name body = V $ BLam $ Abs name body
 infixl 4 $$
 ($$) :: V -> V -> V
 ($$) f a = V $ BApp $ App f a
+
+emptyRec :: V
+emptyRec = V $ BLeaf LEmptyRecord
+
+($=) :: String -> V -> V -> V
+(x $= y) z = V $ BRecExtend $ RecExtend x y z
 
 instance IsString V where
     fromString = V . BLeaf . LVar
@@ -388,3 +396,13 @@ test x = pPrint $ runInfer $ infer mempty x >>= deref
 
 example :: Doc
 example = test $ lam "x" $ lam "y" $ "x" $$ "y" $$ "y"
+
+example2 :: Doc
+example2 =
+    test $ lam "x" $
+    emptyRec
+    & "x" $= "x"
+    & "y" $= lam "x" "x"
+
+main :: IO ()
+main = mapM_ print [example, example2]
