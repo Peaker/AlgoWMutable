@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -7,10 +9,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE RankNTypes #-}
-import           Data.String (IsString(..))
-import           Data.Set (Set)
+module Type
+    ( Infer, runInfer
+    , TypeAST(..), bitraverse, typeSubexprs
+    , Err(..)
+    , infer
+    , example
+    ) where
+
 import           Prelude.Compat hiding (abs)
 
+import           Control.Applicative (Const(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
@@ -19,10 +28,13 @@ import           Control.Monad.ST (ST, runST)
 import           Control.Monad.State (StateT, evalStateT, modify, get)
 import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.Either
+import           Data.Foldable (sequenceA_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
+import           Data.Set (Set)
 import qualified Data.Set as Set
+import           Data.String (IsString(..))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens, (<+>), (<>), text, Doc)
 import           UF (UF)
 import qualified UF as UF
@@ -30,18 +42,41 @@ import qualified UF as UF
 newtype TVarName = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty)
 
-data TType
-data TRecord
-type Type = TypeAST TType
-type Record = TypeAST TRecord
+data TypeT
+data RecordT
+type Type = TypeAST TypeT
+type Record = TypeAST RecordT
 
-data TypeAST tag t where
-    TFun :: !t -> !t -> Type t
-    TInst :: String -> Type t
-    TEmptyRecord :: Record t
-    TRecExtend :: String -> Type t -> Record t -> Record t
+data TypeAST tag ast where
+    TFun :: !(ast TypeT) -> !(ast TypeT) -> Type ast
+    TInst :: String -> Type ast
+    TRecord :: ast RecordT -> Type ast
+    TEmptyRecord :: Record ast
+    TRecExtend :: String -> ast TypeT -> ast RecordT -> Record ast
 
-_TFun :: Lens.Prism' (Type a) (a, a)
+bitraverse ::
+    Applicative f =>
+    (ast TypeT -> f (ast' TypeT)) ->
+    (ast RecordT -> f (ast' RecordT)) ->
+    TypeAST tag ast -> f (TypeAST tag ast')
+bitraverse typ reco = \case
+    TFun a b -> TFun <$> typ a <*> typ b
+    TInst n -> pure (TInst n)
+    TRecord r -> TRecord <$> reco r
+    TEmptyRecord -> pure TEmptyRecord
+    TRecExtend n t r -> TRecExtend n <$> typ t <*> reco r
+
+typeSubexprs ::
+    Applicative f => (forall tag. ast tag -> f (ast' tag)) -> TypeAST t ast -> f (TypeAST t ast')
+typeSubexprs f = bitraverse f f
+
+typeSubexprsList :: TypeAST tag ast -> ([ast TypeT], [ast RecordT])
+typeSubexprsList =
+    getConst . bitraverse
+    (\typ -> Const ([typ], []))
+    (\reco -> Const ([], [reco]))
+
+_TFun :: Lens.Prism' (TypeAST TypeT ast) (ast TypeT, ast TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
     _ -> Nothing
@@ -51,23 +86,35 @@ _TInst = Lens.prism' TInst $ \case
     TInst n -> Just n
     _ -> Nothing
 
-deriving instance Show t => Show (TypeAST tag t)
-deriving instance Functor (TypeAST tag)
-deriving instance Foldable (TypeAST tag)
-deriving instance Traversable (TypeAST tag)
+_TRecord :: Lens.Prism' (Type ast) (ast RecordT)
+_TRecord = Lens.prism' TRecord $ \case
+    TRecord n -> Just n
+    _ -> Nothing
 
-instance Pretty t => Pretty (TypeAST tag t) where
+_TEmptyRecord :: Lens.Prism' (Record a) ()
+_TEmptyRecord = Lens.prism' (\() -> TEmptyRecord) $ \case
+    TEmptyRecord -> Just ()
+    _ -> Nothing
+
+_TRecExtend :: Lens.Prism' (Record ast) (String, ast TypeT, ast RecordT)
+_TRecExtend = Lens.prism' (\(n, t, r) -> TRecExtend n t r) $ \case
+    TRecExtend n t r -> Just (n, t, r)
+    _ -> Nothing
+
+instance (Pretty (ast TypeT), Pretty (ast RecordT)) => Pretty (TypeAST tag ast) where
     pPrintPrec level prec ast =
         case ast of
         TFun a b ->
             maybeParens (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
         TInst name -> "#" <> text name
+        TRecord r -> pPrintPrec level prec r
         TEmptyRecord -> "{}"
         TRecExtend n t r -> "{" <+> text n <+> ":" <+> pPrint t <+> "} :" <+> pPrint r
 
 data Leaf
-    = Var String
+    = LVar String
+    | LEmptyRecord
     deriving (Show)
 
 data Abs v = Abs String !v
@@ -76,21 +123,24 @@ data Abs v = Abs String !v
 data App v = App !v !v
     deriving (Show, Functor, Foldable, Traversable)
 
+data RecExtend v = RecExtend String !v !v
+    deriving (Show, Functor, Foldable, Traversable)
+
 data Val v
     = BLam (Abs v)
     | BApp (App v)
+    | BRecExtend (RecExtend v)
     | BLeaf Leaf
     deriving (Show, Functor, Foldable, Traversable)
 
 newtype V = V (Val V)
     deriving (Show)
 
-data T
-    = T (Type T)
+data T tag
+    = T (TypeAST tag T)
     | TVar (Set TVarName)
-    deriving (Show)
 
-instance Pretty T where
+instance Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
     pPrintPrec _ _ (TVar names) = text "a" <> pPrint (Set.findMin names)
 
@@ -102,7 +152,7 @@ infixl 4 $$
 ($$) f a = V $ BApp $ App f a
 
 instance IsString V where
-    fromString = V . BLeaf . Var
+    fromString = V . BLeaf . LVar
 
 data Err
     = DoesNotUnify
@@ -127,38 +177,37 @@ liftST = Infer . lift . lift
 throwError :: Err -> Infer s a
 throwError = Infer . lift . left
 
-data TVWrap s = TVWrap
-    { tvWrapNames :: Set TVarName
-    , tvWrapType :: Maybe (Type (TS s))
+data TypeASTPosition s tag = TypeASTPosition
+    { _tvWrapNames :: Set TVarName
+    , _tvWrapType :: Maybe (TypeAST tag (UFTypeAST s))
     }
 
-newtype TS s = TS { tsUF :: UF s (TVWrap s) }
+type UFType s = UFTypeAST s TypeT
+type UFRecord s = UFTypeAST s RecordT
+newtype UFTypeAST s tag = TS { tsUF :: UF s (TypeASTPosition s tag) }
 
-type Scope s = Map String (TS s)
+type Scope s = Map String (UFType s)
 
 freshTVarName :: Infer s TVarName
 freshTVarName = modify (+1) >> get <&> TVarName & Infer
 
-freshTVar :: Infer s (TS s)
+freshTVar :: Infer s (UFTypeAST s tag)
 freshTVar =
-    freshTVarName <&> Set.singleton <&> flip TVWrap Nothing
+    freshTVarName <&> Set.singleton <&> flip TypeASTPosition Nothing
     >>= liftST . UF.new <&> TS
 
-wrap :: Type (TS s) -> Infer s (TS s)
-wrap typ = TVWrap Set.empty (Just typ) & UF.new <&> TS & liftST
+wrap :: TypeAST tag (UFTypeAST s) -> Infer s (UFTypeAST s tag)
+wrap typ = TypeASTPosition Set.empty (Just typ) & UF.new <&> TS & liftST
 
-getWrapper :: TS s -> Infer s (TVWrap s)
+getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
 getWrapper (TS r) = UF.find r & liftST
 
-deref :: TS s -> Infer s T
+deref :: UFTypeAST s tag -> Infer s (T tag)
 deref ts =
-    ts & getWrapper >>= \(TVWrap names typ) ->
+    ts & getWrapper >>= \(TypeASTPosition names typ) ->
     case typ of
     Nothing -> return $ TVar names
-    Just t -> t & traverse %%~ deref <&> T
-
--- ref :: T -> Infer s (TS s)
--- ref = undefined
+    Just t -> t & typeSubexprs deref <&> T
 
 unifyMatch :: v -> Lens.Getting (Monoid.First a) v a -> Infer s a
 unifyMatch vTyp prism =
@@ -172,54 +221,138 @@ unifyMatchEq vTyp u prism =
         v <- unifyMatch vTyp prism
         unless (u == v) $ throwError DoesNotUnify
 
-occursCheck :: Set TVarName -> TVWrap s -> Infer s ()
+occursCheck :: Set TVarName -> TypeASTPosition s tag -> Infer s ()
 occursCheck uNames = go
     where
-        go (TVWrap vNames mTyp)
+        recurse xs = mapM_ (getWrapper >=> go) xs
+        -- TODO: Why is a typesig needed here?
+        recurseBoth :: ([UFType s], [UFRecord s]) -> Infer s ()
+        recurseBoth (types, records) = recurse types >> recurse records
+        -- TODO: Why is a typesig needed here?
+        go :: TypeASTPosition s tag -> Infer s ()
+        go (TypeASTPosition vNames mTyp)
             | Set.null (uNames `Set.intersection` vNames) =
                   mTyp
-                  & Lens.traverseOf_ (Lens._Just . traverse)
-                    (getWrapper >=> go)
+                  & Lens.traverseOf_ Lens._Just (recurseBoth . typeSubexprsList)
             | otherwise = throwError OccursCheck
 
-unify :: TS s -> TS s -> Infer s ()
-unify u v =
-    UF.union f (tsUF u) (tsUF v)
+type RecordTail s = (Set TVarName, UFRecord s)
+type RecordFields s = Map String (UFType s)
+type ClosedRecord s = RecordFields s
+type OpenRecord s = (RecordFields s, RecordTail s)
+
+data FlatRecord s = FlatRecord
+    { __frMTail :: Maybe (RecordTail s)
+    , _frFields :: RecordFields s
+    }
+
+Lens.makeLenses ''FlatRecord
+
+flatten :: UFRecord s -> Infer s (FlatRecord s)
+flatten ts =
+    do
+        TypeASTPosition names typ <- getWrapper ts
+        case typ of
+            Nothing -> return $ FlatRecord (Just (names, ts)) Map.empty
+            Just TEmptyRecord -> return $ FlatRecord Nothing Map.empty
+            Just (TRecExtend n t r) ->
+                flatten r <&> frFields . Lens.at n ?~ t
+
+unflatten :: FlatRecord s -> Infer s (UFRecord s)
+unflatten (FlatRecord mTail fields) =
+    Map.toList fields & go
+    where
+        go [] =
+            case mTail of
+            Nothing -> wrap TEmptyRecord
+            Just (_, tailVal) -> return tailVal
+        go ((name, typ):fs) =
+            go fs
+            <&> TRecExtend name typ
+            >>= wrap
+
+unifyClosedRecords :: ClosedRecord s -> ClosedRecord s -> Infer s ()
+unifyClosedRecords uFields vFields
+    | Map.keysSet uFields == Map.keysSet vFields =
+          Map.intersectionWith unifyType uFields vFields
+          & sequenceA_
+    | otherwise = throwError DoesNotUnify
+
+unifyOpenRecord :: OpenRecord s -> ClosedRecord s -> Infer s ()
+unifyOpenRecord (uFields, (_, uTail)) vFields
+    | Map.null uniqueUFields =
+          do
+              tailVal <- unflatten $ FlatRecord Nothing uniqueVFields
+              unify (\_ _ -> return ()) uTail tailVal
+    | otherwise = throwError DoesNotUnify
+    where
+        uniqueUFields = uFields `Map.difference` vFields
+        uniqueVFields = vFields `Map.difference` uFields
+
+unifyOpenRecords :: OpenRecord s -> OpenRecord s -> Infer s ()
+unifyOpenRecords = undefined
+
+unifyRecord :: UFRecord s -> UFRecord s -> Infer s ()
+unifyRecord u v =
+    do
+        FlatRecord uMTail uFields <- flatten u
+        FlatRecord vMTail vFields <- flatten v
+        case (uMTail, vMTail) of
+            (Nothing, Nothing) -> unifyClosedRecords uFields vFields
+            (Just uTail, Nothing) -> unifyOpenRecord (uFields, uTail) vFields
+            (Nothing, Just vTail) -> unifyOpenRecord (vFields, vTail) uFields
+            (Just uTail, Just vTail) -> unifyOpenRecords (uFields, uTail) (vFields, vTail)
+
+unify ::
+    (TypeAST tag (UFTypeAST s) ->
+     TypeAST tag (UFTypeAST s) -> Infer s ()) ->
+    UFTypeAST s tag -> UFTypeAST s tag -> Infer s ()
+unify f u v =
+    UF.union g (tsUF u) (tsUF v)
     & liftST
     >>= maybe (return ()) id
     where
-        f uw@(TVWrap uNames uMTyp) vw@(TVWrap vNames vMTyp) =
+        g uw@(TypeASTPosition uNames uMTyp) vw@(TypeASTPosition vNames vMTyp) =
             case (uMTyp, vMTyp) of
             (Nothing, Nothing) -> (Nothing, return ())
             (Nothing, Just y) -> (Just y, occursCheck uNames vw)
             (Just x, Nothing) -> (Just x, occursCheck vNames uw)
-            (Just (TInst uName), Just vTyp) ->
-                (uMTyp, unifyMatchEq vTyp uName _TInst)
-            (Just (TFun uArg uRes), Just vTyp) ->
-                ( uMTyp
-                , do
-                    (vArg, vRes) <- unifyMatch vTyp _TFun
-                    unify uArg vArg
-                    unify uRes vRes
-                )
-            & _1 %~ TVWrap (uNames `Set.union` vNames)
+            (Just x, Just y) -> (Just x, f x y)
+            & _1 %~ TypeASTPosition (uNames `Set.union` vNames)
 
-inferLeaf :: Map String a -> Leaf -> Infer s a
+unifyType :: UFType s -> UFType s -> Infer s ()
+unifyType u v =
+    unify f u v
+    where
+        f (TInst uName) vTyp =
+            unifyMatchEq vTyp uName _TInst
+        f (TRecord uRec) vTyp =
+            do
+                vRec <- unifyMatch vTyp _TRecord
+                unifyRecord uRec vRec
+        f (TFun uArg uRes) vTyp =
+            do
+                (vArg, vRes) <- unifyMatch vTyp _TFun
+                unifyType uArg vArg
+                unifyType uRes vRes
+
+inferLeaf :: Scope s -> Leaf -> Infer s (UFType s)
 inferLeaf scope leaf =
     case leaf of
-    Var n ->
+    LEmptyRecord -> wrap TEmptyRecord >>= wrap . TRecord
+    LVar n ->
         case Map.lookup n scope of
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
 
-inferLam :: Map String (TS s) -> Abs V -> Infer s (TS s)
+inferLam :: Scope s -> Abs V -> Infer s (UFType s)
 inferLam scope (Abs n body) =
     do
         nType <- freshTVar
         resType <- infer (Map.insert n nType scope) body
         TFun nType resType & wrap
 
-inferApp :: Scope s -> App V -> Infer s (TS s)
+inferApp :: Scope s -> App V -> Infer s (UFType s)
 inferApp scope (App fun arg) =
     do
         funTyp <- infer scope fun
@@ -227,15 +360,28 @@ inferApp scope (App fun arg) =
         resTyp <- freshTVar
 
         expectedFunTyp <- TFun argTyp resTyp & wrap
-        unify expectedFunTyp funTyp
+        unifyType expectedFunTyp funTyp
         return resTyp
 
-infer :: Scope s -> V -> Infer s (TS s)
+inferRecExtend :: Scope s -> RecExtend V -> Infer s (UFType s)
+inferRecExtend scope (RecExtend name val rest) =
+    do
+        valTyp <- infer scope val
+        restTyp <- infer scope rest
+        unknownRestFields <- freshTVar
+        expectedResTyp <- TRecord unknownRestFields & wrap
+        unifyType expectedResTyp restTyp
+        TRecExtend name valTyp unknownRestFields
+            & wrap
+            >>= wrap . TRecord
+
+infer :: Scope s -> V -> Infer s (UFType s)
 infer scope (V v) =
     case v of
     BLeaf l -> inferLeaf scope l
     BLam abs -> inferLam scope abs
     BApp app -> inferApp scope app
+    BRecExtend ext -> inferRecExtend scope ext
 
 test :: V -> Doc
 test x = pPrint $ runInfer $ infer mempty x >>= deref
