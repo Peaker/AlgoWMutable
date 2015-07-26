@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
+import           Data.String (IsString(..))
 import           Data.Set (Set)
 import           Prelude.Compat hiding (abs)
 
@@ -20,7 +21,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
 import qualified Data.Set as Set
-import           Text.PrettyPrint.HughesPJClass
+import           Text.PrettyPrint.HughesPJClass (Pretty(..), prettyParen, (<+>), (<>), text, Doc)
 import           UF (UF)
 import qualified UF as UF
 
@@ -71,11 +72,12 @@ instance Pretty T where
 lam :: String -> V -> V
 lam name body = V $ BLam $ Abs name body
 
-apply :: V -> V -> V
-apply f a = V $ BApp $ App f a
+infixl 4 $$
+($$) :: V -> V -> V
+($$) f a = V $ BApp $ App f a
 
-var :: String -> V
-var = V . BLeaf . Var
+instance IsString V where
+    fromString = V . BLeaf . Var
 
 data Err
     = DoesNotUnify
@@ -214,3 +216,6 @@ infer scope (V v) =
 
 test :: V -> Doc
 test x = pPrint $ runInfer $ infer mempty x >>= deref
+
+example :: Doc
+example = test $ lam "x" $ lam "y" $ "x" $$ "y" $$ "y"
