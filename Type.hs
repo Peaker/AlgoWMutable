@@ -609,6 +609,12 @@ unifyRecord =
     where
         -- We already know we are record vals, and will re-read them
         -- via flatten, so no need for unify's read of these:
+        f TEmptyRecord TEmptyRecord = return ()
+        f (TRecExtend un ut ur) (TRecExtend vn vt vr)
+            | un == vn =
+            do
+                unifyType ut vt
+                unifyRecord ur vr
         f u v =
             do
                 FlatRecord uMTail uFields <- flattenVal u
