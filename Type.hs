@@ -49,7 +49,7 @@ import           Data.Type.Equality
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
-import           Control.Monad (unless, (>=>))
+import           Control.Monad (unless)
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
 import           Data.Foldable (sequenceA_)
@@ -67,37 +67,17 @@ import           UF (UF)
 import qualified UF as UF
 import           WriterT
 
-newtype Const a (b :: k) = Const { getConst :: a }
-    deriving (Eq, Ord, Read, Show, Functor)
-
-instance Monoid a => Applicative (Const a) where
-    pure _ = Const mempty
-    Const x <*> Const y = Const (mappend x y)
-
 data ASTTag = TypeT | RecordT
 type Type = TypeAST 'TypeT
 type Record = TypeAST 'RecordT
-
-data ASTTagHandlers f = ASTTagHandlers
-    { atpType :: f 'TypeT
-    , atpRecord :: f 'RecordT
-    }
 
 data ASTTagEquality t
     = IsTypeT (t :~: 'TypeT)
     | IsRecordT (t :~: 'RecordT)
 
-class IsTag t where
-    caseTagOf :: ASTTagHandlers f -> f t
-    tagRefl :: ASTTagEquality t
-
-instance IsTag 'TypeT where
-    caseTagOf = atpType
-    tagRefl = IsTypeT Refl
-
-instance IsTag 'RecordT where
-    caseTagOf = atpRecord
-    tagRefl = IsRecordT Refl
+class IsTag t where tagRefl :: ASTTagEquality t
+instance IsTag 'TypeT where tagRefl = IsTypeT Refl
+instance IsTag 'RecordT where tagRefl = IsRecordT Refl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
@@ -131,12 +111,6 @@ bitraverse typ reco = \case
 typeSubexprs ::
     Applicative f => (forall tag. IsTag tag => ast tag -> f (ast' tag)) -> TypeAST t ast -> f (TypeAST t ast')
 typeSubexprs f = bitraverse f f
-
-typeSubexprsList :: TypeAST tag ast -> ([ast 'TypeT], [ast 'RecordT])
-typeSubexprsList =
-    getConst . bitraverse
-    (\typ -> Const ([typ], []))
-    (\reco -> Const ([], [reco]))
 
 _TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
@@ -309,7 +283,7 @@ instance IsString V where
 data Err
     = DoesNotUnify Doc Doc
     | VarNotInScope String
-    | OccursCheck
+    | InfiniteType
     | DuplicateFields [String]
     deriving (Show)
 
@@ -321,8 +295,8 @@ instance Pretty Err where
         "expected:" <+> expected <+> "but got:" <+> got
     pPrint (VarNotInScope name) =
         text name <+> "not in scope!"
-    pPrint OccursCheck =
-        "OccursCheck"
+    pPrint InfiniteType =
+        "Infinite type encountered"
     pPrint (DuplicateFields names) =
         "Duplicate fields in record:" <+>
         (intercalate ", " . map text) names
@@ -504,23 +478,29 @@ instantiate (Scheme (SchemeBinders typeVars recordVars) typ) =
 getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
 getWrapper (TS r) = UF.find r & liftST
 
-deref :: forall s tag. IsTag tag => UFTypeAST s tag -> WriterT SchemeBinders (Infer s) (T tag)
-deref ts =
+deref ::
+    forall s tag. IsTag tag =>
+    Set Int ->
+    UFTypeAST s tag -> WriterT SchemeBinders (Infer s) (T tag)
+deref visited ts =
     lift (getWrapper ts) >>= \(TypeASTPosition names typ) ->
+    let tvName = Set.findMin names
+    in if _tVarName tvName `Set.member` visited
+    then throwError InfiniteType & lift
+    else
     case typ of
     Left cs ->
         do
-            let tvName = Set.findMin names
             tell $
                 case tagRefl :: ASTTagEquality tag of
                 IsTypeT Refl -> mempty { schemeTypeBinders = Map.singleton tvName cs }
                 IsRecordT Refl -> mempty { schemeRecordBinders = Map.singleton tvName cs }
             return $ TVar tvName
-    Right t -> t & typeSubexprs deref <&> T
+    Right t -> t & typeSubexprs (deref (Set.insert (_tVarName tvName) visited)) <&> T
 
 generalize :: UFType s -> Infer s (Scheme 'TypeT)
 generalize t =
-    deref t
+    deref Set.empty t
     & runWriterT
     <&> uncurry (flip Scheme)
 
@@ -535,48 +515,6 @@ unifyMatchEq expected vTyp u prism =
     do
         v <- unifyMatch expected vTyp prism
         unless (u == v) $ throwError $ DoesNotUnify (pPrint u) (pPrint vTyp)
-
-newtype PosHandler s tag = PosHandler { runPosHandler :: TypeASTPosition s tag -> Infer s () }
-
-atAllPositions ::
-    forall s tag. IsTag tag => ASTTagHandlers (PosHandler s) ->
-    TypeASTPosition s tag -> Infer s ()
-atAllPositions handlers =
-    go
-    where
-        -- Let generalization is disabled because of a mountain of
-        -- extensions on top
-        recurse :: IsTag t => [UFTypeAST s t] -> Infer s ()
-        recurse xs = mapM_ (getWrapper >=> go) xs
-        recurseBoth :: ([UFTypeAST s 'TypeT], [UFTypeAST s 'RecordT]) -> Infer s ()
-        recurseBoth (types, records) = recurse types >> recurse records
-        go :: IsTag t => TypeASTPosition s t -> Infer s ()
-        go pos@(TypeASTPosition _ mTyp) =
-            do
-                runPosHandler (caseTagOf handlers) pos
-                mTyp & Lens.traverseOf_ Lens._Right (recurseBoth . typeSubexprsList)
-
-occursCheck :: forall tag s. IsTag tag => Set (TVarName tag) -> TypeASTPosition s tag -> Infer s ()
-occursCheck uNames pos = atAllPositions handlers pos
-    where
-        -- TODO: How to do this cleanly?
-        handlers :: ASTTagHandlers (PosHandler s)
-        handlers = ASTTagHandlers
-            { atpType =
-                  case tagRefl :: ASTTagEquality tag of
-                  IsTypeT Refl -> PosHandler verifyNoIntersect
-                  IsRecordT Refl -> PosHandler doNothing
-            , atpRecord =
-                  case tagRefl :: ASTTagEquality tag of
-                  IsRecordT Refl -> PosHandler verifyNoIntersect
-                  IsTypeT Refl -> PosHandler doNothing
-            }
-        doNothing _ = return ()
-        verifyNoIntersect :: TypeASTPosition s tag -> Infer s ()
-        verifyNoIntersect (TypeASTPosition vNames _) =
-            unless (Set.null (uNames `Set.intersection`
-                              vNames)) $
-            throwError OccursCheck
 
 type RecordTail s = UFRecord s
 type RecordFields s = Map String (UFType s)
@@ -693,11 +631,11 @@ unify f u v =
     & liftST
     >>= maybe (return ()) id
     where
-        g uw@(TypeASTPosition uNames uMTyp) vw@(TypeASTPosition vNames vMTyp) =
+        g (TypeASTPosition uNames uMTyp) (TypeASTPosition vNames vMTyp) =
             case (uMTyp, vMTyp) of
             (Left uCs, Left vCs) -> (Left (uCs `mappend` vCs), return ())
-            (Left uCs, Right y) -> (Right y, occursCheck uNames vw >> constraintsCheck uCs y)
-            (Right x, Left vCs) -> (Right x, occursCheck vNames uw >> constraintsCheck vCs x)
+            (Left uCs, Right y) -> (Right y, constraintsCheck uCs y)
+            (Right x, Left vCs) -> (Right x, constraintsCheck vCs x)
             (Right x, Right y) -> (Right x, f x y)
             & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
@@ -806,7 +744,7 @@ globals =
         (==>) = Map.singleton
 
 (<+?>) :: Doc -> Doc -> Doc
-x <+?> y = fcat [x, y]
+x <+?> y = fcat [x, " ", y]
 
 test :: V -> IO ()
 test x =
