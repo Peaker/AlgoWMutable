@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
@@ -49,9 +50,7 @@ import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Control.Monad (unless, (>=>))
 import           Control.Monad.ST (ST, runST)
-import           Control.Monad.State (StateT(..), evalStateT, modify, get)
 import           Control.Monad.Trans.Class (lift)
-import           Control.Monad.Trans.Either
 import           Data.Foldable (sequenceA_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -327,18 +326,43 @@ instance Pretty Err where
         "Duplicate fields in record:" <+>
         (intercalate ", " . map text) names
 
-newtype Infer s a = Infer { unInfer :: StateT Int (EitherT Err (ST s)) a }
-    deriving (Functor, Applicative, Monad)
+newtype Infer s a = Infer
+    { unInfer :: Int -> ST s (Either Err (Int, a)) }
+    deriving (Functor)
+instance Applicative (Infer s) where
+    {-# INLINE pure #-}
+    pure x = Infer $ \s -> pure (Right (s, x))
+    {-# INLINE (<*>) #-}
+    Infer f <*> Infer x =
+        Infer $ \s -> f s >>= \case
+        Left err -> pure (Left err)
+        Right (s', fres) -> x s' >>= \case
+            Left err -> pure (Left err)
+            Right (s'', xres) ->
+                pure (Right (s'', fres xres))
+instance Monad (Infer s) where
+    {-# INLINE return #-}
+    return = pure
+    {-# INLINE (>>=) #-}
+    Infer act >>= f = Infer $ \s -> act s >>= \case
+        Left err -> pure (Left err)
+        Right (s', x) -> unInfer (f x) s'
 
 runInfer :: (forall s. Infer s a) -> Either Err a
-runInfer act = runST $ runEitherT $ (`evalStateT` 0) $ unInfer $ act
+runInfer act = runST (unInfer act 0) <&> snd
 
 {-# INLINE liftST #-}
 liftST :: ST s a -> Infer s a
-liftST = Infer . lift . lift
+liftST act = Infer $ \s -> act <&> Right . (,) s
 
 throwError :: Err -> Infer s a
-throwError = Infer . lift . left
+throwError err = Infer $ \_ -> return $ Left err
+
+modify' :: (Int -> Int) -> Infer s Int
+modify' f =
+    Infer $ \s ->
+    let !res = f s
+    in return $ Right (res, res)
 
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
@@ -438,7 +462,7 @@ insertLocal name typ (Scope locals globals) =
 
 {-# INLINE freshTVarName #-}
 freshTVarName :: Infer s (TVarName tag)
-freshTVarName = modify (+1) >> get <&> TVarName & Infer
+freshTVarName = modify' (+1) <&> TVarName
 
 {-# INLINE newPosition #-}
 newPosition ::
