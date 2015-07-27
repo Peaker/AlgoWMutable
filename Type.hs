@@ -49,7 +49,7 @@ import           Data.Type.Equality
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
-import           Control.Monad (unless)
+import           Control.Monad (unless, void)
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
 import           Data.Foldable (sequenceA_)
@@ -374,7 +374,7 @@ instance Monoid (Constraints 'RecordT) where
         RecordConstraints (x `mappend` y)
 
 data TypeASTPosition s tag = TypeASTPosition
-    { _tastPosNames :: Set (TVarName tag)
+    { __tastPosNames :: Set (TVarName tag)
     , _tastPosType :: Either (Constraints tag) (TypeAST tag (UFTypeAST s))
     }
 
@@ -383,6 +383,8 @@ type UFRecord s = UFTypeAST s 'RecordT
 newtype UFTypeAST s tag = TS { tsUF :: UF s (TypeASTPosition s tag) }
 instance Pretty (UFTypeAST s tag) where
     pPrint _ = ".."
+
+Lens.makeLenses ''TypeASTPosition
 
 type TVarBinders tag = Map (TVarName tag) (Constraints tag)
 
@@ -621,7 +623,7 @@ unifyRecord =
 
 constraintsCheck :: Constraints tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
 constraintsCheck TypeConstraints _ = return ()
-constraintsCheck (RecordConstraints names) r =
+constraintsCheck old@(RecordConstraints names) r =
     do
         FlatRecord mTail fields <- flattenVal r
         let fieldsSet = Map.keysSet fields
@@ -630,9 +632,11 @@ constraintsCheck (RecordConstraints names) r =
             Set.toList forbidden
         case mTail of
             Nothing -> return ()
-            Just rTail ->
-                freshTVar (RecordConstraints fieldsSet)
-                >>= unifyRecord rTail
+            Just rTail -> setConstraints rTail (old `mappend` RecordConstraints fieldsSet)
+
+setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
+setConstraints u constraints =
+    UF.modify (tsUF u) (tastPosType . Lens._Left <>~ constraints) & liftST & void
 
 unify ::
     (IsTag tag, Monoid (Constraints tag)) =>

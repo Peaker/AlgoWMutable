@@ -1,13 +1,16 @@
+{-# LANGUAGE TemplateHaskell #-}
 module UF
     ( UF
     , new, union, find
+    , modify
     ) where
 
-import Prelude.Compat
+import           Prelude.Compat
 
-import Control.Lens.Operators
-import Control.Monad.ST (ST)
-import Data.STRef
+import qualified Control.Lens as Lens
+import           Control.Lens.Operators
+import           Control.Monad.ST (ST)
+import           Data.STRef
 
 data LenList a = LenList
     { lenList :: {-# UNPACK #-}!Int
@@ -21,7 +24,7 @@ instance Monoid (LenList a) where
         LenList (s0+s1) (l0 ++ l1)
 
 data GroupVal s a = GroupVal
-    { groupTotal :: a
+    { _groupTotal :: a
     , groupElements :: LenList (UF s a)
     }
 
@@ -32,6 +35,8 @@ newtype Group s a = Group
 newtype UF s a = UF
     { ufGroup :: STRef s (Group s a)
     }
+
+Lens.makeLenses ''GroupVal
 
 new :: a -> ST s (UF s a)
 new x =
@@ -51,7 +56,7 @@ unifyGroup unify big (GroupVal bigTotal bigElems) small smallVal =
     do
         mapM_ (setGroup big) $ lenListElems $ groupElements smallVal
         writeSTRef (groupData small) $ error "Dead group"
-        let (newTotal, res) = unify bigTotal (groupTotal smallVal)
+        let (newTotal, res) = unify bigTotal (_groupTotal smallVal)
         writeSTRef (groupData big) $
             GroupVal newTotal $ mappend bigElems $ groupElements smallVal
         return res
@@ -75,4 +80,12 @@ find u =
     & readSTRef
     <&> groupData
     >>= readSTRef
-    <&> groupTotal
+    <&> _groupTotal
+
+modify :: UF s a -> (a -> a) -> ST s ()
+modify u f =
+    do
+        groupRef <- ufGroup u & readSTRef <&> groupData
+        readSTRef groupRef
+            <&> groupTotal %~ f
+            >>= writeSTRef groupRef
