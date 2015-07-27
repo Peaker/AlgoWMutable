@@ -187,6 +187,12 @@ env = newScope $
         , ("-",      forAll 1 0 $ \ [a] [] -> infixType a a a)
         , ("+",      forAll 1 0 $ \ [a] [] -> infixType a a a)
         , ("/",      forAll 1 0 $ \ [a] [] -> infixType a a a)
+
+        , ("bool'",  forAll 1 0 $ \ [a] [] -> boolType ~> a ~> a ~> a)
+        , ("eq",     forAll 1 0 $ \ [a] [] -> a ~> a ~> boolType)
+        , ("mul",    forAll 1 0 $ \ [a] [] -> a ~> a ~> a)
+        , ("sub",    forAll 1 0 $ \ [a] [] -> a ~> a ~> a)
+
         , ("//",     forAll 0 0 $ \ []  [] -> infixType intType intType intType)
         -- , ("sum",    forAll 1 0 $ \ [a] [] -> listOf a ~> a)
         -- , ("filter", forAll 1 0 $ \ [a] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
@@ -244,6 +250,19 @@ factorialVal =
                 infixArgs x (loop $$ (global "-" $$ infixArgs x (litInt 1)))
             )
         ]
+    )
+
+factorialValNoRecords :: V
+factorialValNoRecords =
+    global "fix" $$
+    lambda "loop"
+    ( \loop ->
+        lambda "x" $ \x ->
+        global "bool'" $$
+        (global "eq" $$ x $$ (litInt 0)) $$
+        litInt 1 $$
+        (global "mul" $$ x $$
+         (loop $$ (global "sub" $$ x $$ litInt 1)))
     )
 
 euler1Val :: V

@@ -27,7 +27,7 @@ module Type
     , SchemeBinders(..)
     , Scheme(..)
 
-    , T(..), V(..)
+    , T(..), V(..), AV(..)
 
     , recordType, recordFrom, (~>), tInst
     , intType, boolType
@@ -61,7 +61,7 @@ import qualified Data.Set as Set
 import           Data.String (IsString(..))
 import           GHC.Generics (Generic)
 import           MapPretty ()
-import           Text.PrettyPrint (fcat, hcat, punctuate, Doc, (<+>), (<>), text)
+import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           UF (UF)
 import qualified UF as UF
@@ -200,6 +200,19 @@ instance Pretty v => Pretty (Val v) where
 
 newtype V = V (Val V)
     deriving (Show, Pretty)
+
+data AV a = AV
+    { aAnnotation :: a
+    , aVal :: Val (AV a)
+    } deriving (Show, Functor, Foldable, Traversable)
+instance Pretty a => Pretty (AV a) where
+    pPrintPrec level prec (AV ann v)
+        | isEmpty annDoc = pPrintPrec level prec v
+        | otherwise =
+        "{" <> annDoc <> "}" <>
+        pPrintPrec level 10 v
+        where
+            annDoc = pPrint ann
 
 data T tag
     = T (TypeAST tag T)
