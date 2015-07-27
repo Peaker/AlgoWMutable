@@ -1,15 +1,16 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main
     ( Infer, runInfer
     , TypeAST(..), bitraverse, typeSubexprs
@@ -47,22 +48,21 @@ import qualified UF as UF
 newtype TVarName = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty)
 
-data TypeT
-data RecordT
-type Type = TypeAST TypeT
-type Record = TypeAST RecordT
+data ASTTag = TypeT | RecordT
+type Type = TypeAST 'TypeT
+type Record = TypeAST 'RecordT
 
 data TypeAST tag ast where
-    TFun :: !(ast TypeT) -> !(ast TypeT) -> Type ast
+    TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> Type ast
     TInst :: String -> Type ast
-    TRecord :: ast RecordT -> Type ast
+    TRecord :: ast 'RecordT -> Type ast
     TEmptyRecord :: Record ast
-    TRecExtend :: String -> ast TypeT -> ast RecordT -> Record ast
+    TRecExtend :: String -> ast 'TypeT -> ast 'RecordT -> Record ast
 
 bitraverse ::
     Applicative f =>
-    (ast TypeT -> f (ast' TypeT)) ->
-    (ast RecordT -> f (ast' RecordT)) ->
+    (ast 'TypeT -> f (ast' 'TypeT)) ->
+    (ast 'RecordT -> f (ast' 'RecordT)) ->
     TypeAST tag ast -> f (TypeAST tag ast')
 bitraverse typ reco = \case
     TFun a b -> TFun <$> typ a <*> typ b
@@ -75,13 +75,13 @@ typeSubexprs ::
     Applicative f => (forall tag. ast tag -> f (ast' tag)) -> TypeAST t ast -> f (TypeAST t ast')
 typeSubexprs f = bitraverse f f
 
-typeSubexprsList :: TypeAST tag ast -> ([ast TypeT], [ast RecordT])
+typeSubexprsList :: TypeAST tag ast -> ([ast 'TypeT], [ast 'RecordT])
 typeSubexprsList =
     getConst . bitraverse
     (\typ -> Const ([typ], []))
     (\reco -> Const ([], [reco]))
 
-_TFun :: Lens.Prism' (TypeAST TypeT ast) (ast TypeT, ast TypeT)
+_TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
     _ -> Nothing
@@ -91,7 +91,7 @@ _TInst = Lens.prism' TInst $ \case
     TInst n -> Just n
     _ -> Nothing
 
-_TRecord :: Lens.Prism' (Type ast) (ast RecordT)
+_TRecord :: Lens.Prism' (Type ast) (ast 'RecordT)
 _TRecord = Lens.prism' TRecord $ \case
     TRecord n -> Just n
     _ -> Nothing
@@ -101,12 +101,12 @@ _TEmptyRecord = Lens.prism' (\() -> TEmptyRecord) $ \case
     TEmptyRecord -> Just ()
     _ -> Nothing
 
-_TRecExtend :: Lens.Prism' (Record ast) (String, ast TypeT, ast RecordT)
+_TRecExtend :: Lens.Prism' (Record ast) (String, ast 'TypeT, ast 'RecordT)
 _TRecExtend = Lens.prism' (\(n, t, r) -> TRecExtend n t r) $ \case
     TRecExtend n t r -> Just (n, t, r)
     _ -> Nothing
 
-instance (Pretty (ast TypeT), Pretty (ast RecordT)) => Pretty (TypeAST tag ast) where
+instance (Pretty (ast 'TypeT), Pretty (ast 'RecordT)) => Pretty (TypeAST tag ast) where
     pPrintPrec level prec ast =
         case ast of
         TFun a b ->
@@ -228,15 +228,15 @@ throwError :: Err -> Infer s a
 throwError = Infer . lift . left
 
 data Constraints tag where
-    TypeConstraints :: Constraints TypeT
+    TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
-    RecordConstraints :: Set String -> Constraints RecordT
+    RecordConstraints :: Set String -> Constraints 'RecordT
 
-instance Monoid (Constraints TypeT) where
+instance Monoid (Constraints 'TypeT) where
     mempty = TypeConstraints
     mappend _ _ = TypeConstraints
 
-instance Monoid (Constraints RecordT) where
+instance Monoid (Constraints 'RecordT) where
     mempty = RecordConstraints mempty
     mappend (RecordConstraints x) (RecordConstraints y) =
         RecordConstraints (x `mappend` y)
@@ -246,8 +246,8 @@ data TypeASTPosition s tag = TypeASTPosition
     , _tastPosType :: Either (Constraints tag) (TypeAST tag (UFTypeAST s))
     }
 
-type UFType s = UFTypeAST s TypeT
-type UFRecord s = UFTypeAST s RecordT
+type UFType s = UFTypeAST s 'TypeT
+type UFRecord s = UFTypeAST s 'RecordT
 newtype UFTypeAST s tag = TS { tsUF :: UF s (TypeASTPosition s tag) }
 
 type Scope s = Map String (UFType s)
