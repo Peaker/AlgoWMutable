@@ -16,7 +16,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Main
-    ( Infer, runInfer
+    ( Infer, runInfer, inferScheme
     , TypeAST(..), bitraverse, typeSubexprs
     , SchemeBinders(..)
     , Scheme(..)
@@ -69,8 +69,8 @@ data ASTTagHandlers f = ASTTagHandlers
     }
 
 data ASTTagEquality t
-    = ASTTagEqualsTypeT (t :~: 'TypeT)
-    | ASTTagEqualsRecordT (t :~: 'RecordT)
+    = IsTypeT (t :~: 'TypeT)
+    | IsRecordT (t :~: 'RecordT)
 
 class IsTag t where
     caseTagOf :: ASTTagHandlers f -> f t
@@ -78,11 +78,11 @@ class IsTag t where
 
 instance IsTag 'TypeT where
     caseTagOf = atpType
-    tagRefl = ASTTagEqualsTypeT Refl
+    tagRefl = IsTypeT Refl
 
 instance IsTag 'RecordT where
     caseTagOf = atpRecord
-    tagRefl = ASTTagEqualsRecordT Refl
+    tagRefl = IsRecordT Refl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty)
@@ -154,11 +154,13 @@ instance (Pretty (ast 'TypeT), Pretty (ast 'RecordT)) => Pretty (TypeAST tag ast
 
 data Leaf
     = LVar String
+    | LGlobal String
     | LEmptyRecord
     deriving (Show)
 
 instance Pretty Leaf where
     pPrint (LVar x) = text x
+    pPrint (LGlobal x) = text x
     pPrint LEmptyRecord = "{}"
 
 data Abs v = Abs String !v
@@ -297,13 +299,14 @@ instance Monoid SchemeBinders where
         (Map.unionWith mappend t0 t1)
         (Map.unionWith mappend r0 r1)
 
-data Scheme = Scheme
+data Scheme tag = Scheme
     { schemeBinders :: SchemeBinders
-    , schemeType :: T 'TypeT
+    , schemeType :: T tag
     }
 
 pPrintTV :: (TVarName tag, Constraints tag) -> Doc
-pPrintTV (tv, constraints) = "∀a" <> pPrint tv <> suffix constraints
+pPrintTV (tv, constraints) =
+    "∀a" <> pPrint tv <> suffix constraints
     where
         suffix :: Constraints tag -> Doc
         suffix TypeConstraints = ""
@@ -316,10 +319,26 @@ instance Pretty SchemeBinders where
         (map pPrintTV (Map.toList tvs) ++
          map pPrintTV (Map.toList rtvs))
 
-instance Pretty Scheme where
+instance Pretty (Scheme tag) where
     pPrint (Scheme binders typ) = pPrint binders <> "." <+> pPrint typ
 
-type Scope s = Map String (UFType s)
+data Scope s = Scope
+    { _scopeLocals :: Map String (UFType s)
+    , _scopeGlobals :: Map String (Scheme 'TypeT)
+    }
+
+emptyScope :: Scope s
+emptyScope = Scope Map.empty Map.empty
+
+lookupLocal :: String -> Scope s -> Maybe (UFType s)
+lookupLocal str (Scope locals _) = Map.lookup str locals
+
+lookupGlobal :: String -> Scope s -> Maybe (Scheme 'TypeT)
+lookupGlobal str (Scope _ globals) = Map.lookup str globals
+
+insertLocal :: String -> UFType s -> Scope s -> Scope s
+insertLocal name typ (Scope locals globals) =
+    Scope (Map.insert name typ locals) globals
 
 freshTVarName :: Infer s (TVarName tag)
 freshTVarName = modify (+1) >> get <&> TVarName & Infer
@@ -339,6 +358,21 @@ freshTVar = newPosition . Left
 wrap :: TypeAST tag (UFTypeAST s) -> Infer s (UFTypeAST s tag)
 wrap = newPosition . Right
 
+instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (UFTypeAST s tag)
+instantiate (Scheme (SchemeBinders typeVars recordVars) typ) =
+    do
+        typeUFs <- traverse freshTVar typeVars
+        recordUFs <- traverse freshTVar recordVars
+        let lookupTVar :: forall t. IsTag t => TVarName t -> UFTypeAST s t
+            lookupTVar tvar =
+                case tagRefl :: ASTTagEquality t of
+                IsTypeT Refl -> typeUFs Map.! tvar
+                IsRecordT Refl -> recordUFs Map.! tvar
+        let go :: forall t. IsTag t => T t -> Infer s (UFTypeAST s t)
+            go (TVar tvarName) = return (lookupTVar tvarName)
+            go (T typeAST) = typeSubexprs go typeAST >>= wrap
+        go typ
+
 getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
 getWrapper (TS r) = UF.find r & liftST
 
@@ -350,13 +384,13 @@ deref ts =
         do
             let tvName = Set.findMin names
             tell $
-                case (tagRefl :: ASTTagEquality tag) of
-                ASTTagEqualsTypeT Refl -> mempty { schemeTypeBinders = Map.singleton tvName cs }
-                ASTTagEqualsRecordT Refl -> mempty { schemeRecordBinders = Map.singleton tvName cs }
+                case tagRefl :: ASTTagEquality tag of
+                IsTypeT Refl -> mempty { schemeTypeBinders = Map.singleton tvName cs }
+                IsRecordT Refl -> mempty { schemeRecordBinders = Map.singleton tvName cs }
             return $ TVar tvName
     Right t -> t & typeSubexprs deref <&> T
 
-generalize :: UFType s -> Infer s Scheme
+generalize :: UFType s -> Infer s (Scheme 'TypeT)
 generalize t =
     deref t
     & runWriterT
@@ -401,13 +435,13 @@ occursCheck uNames pos = atAllPositions handlers pos
         handlers :: ASTTagHandlers (PosHandler s)
         handlers = ASTTagHandlers
             { atpType =
-                  case (tagRefl :: ASTTagEquality tag) of
-                  ASTTagEqualsTypeT Refl -> PosHandler verifyNoIntersect
-                  ASTTagEqualsRecordT Refl -> PosHandler doNothing
+                  case tagRefl :: ASTTagEquality tag of
+                  IsTypeT Refl -> PosHandler verifyNoIntersect
+                  IsRecordT Refl -> PosHandler doNothing
             , atpRecord =
-                  case (tagRefl :: ASTTagEquality tag) of
-                  ASTTagEqualsRecordT Refl -> PosHandler verifyNoIntersect
-                  ASTTagEqualsTypeT Refl -> PosHandler doNothing
+                  case tagRefl :: ASTTagEquality tag of
+                  IsRecordT Refl -> PosHandler verifyNoIntersect
+                  IsTypeT Refl -> PosHandler doNothing
             }
         doNothing _ = return ()
         verifyNoIntersect :: TypeASTPosition s tag -> Infer s ()
@@ -550,8 +584,12 @@ inferLeaf :: Scope s -> Leaf -> Infer s (UFType s)
 inferLeaf scope leaf =
     case leaf of
     LEmptyRecord -> wrap TEmptyRecord >>= wrap . TRecord
+    LGlobal n ->
+        case lookupGlobal n scope of
+        Just scheme -> instantiate scheme
+        Nothing -> throwError $ VarNotInScope n
     LVar n ->
-        case Map.lookup n scope of
+        case lookupLocal n scope of
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
 
@@ -559,7 +597,7 @@ inferLam :: Scope s -> Abs V -> Infer s (UFType s)
 inferLam scope (Abs n body) =
     do
         nType <- freshTVar TypeConstraints
-        resType <- infer (Map.insert n nType scope) body
+        resType <- infer (insertLocal n nType scope) body
         TFun nType resType & wrap
 
 inferApp :: Scope s -> App V -> Infer s (UFType s)
@@ -607,14 +645,15 @@ infer scope (V v) =
     BRecExtend ext -> inferRecExtend scope ext
     BGetField ext -> inferGetField scope ext
 
+inferScheme :: V -> Either Err (Scheme 'TypeT)
+inferScheme x = runInfer $ infer emptyScope x >>= generalize
+
 test :: V -> IO ()
 test x =
     print $ pPrint x <+>
-    case etyp of
+    case inferScheme x of
     Left err -> "causes type error:" <+> pPrint err
     Right typ -> "::" <+> pPrint typ
-    where
-        etyp = runInfer $ infer mempty x >>= generalize
 
 example1 :: V
 example1 = lam "x" $ lam "y" $ "x" $$ "y" $$ "y"
