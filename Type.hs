@@ -16,14 +16,23 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Main
-    ( Infer, runInfer, inferScheme
+    ( Infer, runInfer, inferScheme, infer
+    , Err(..)
+    , Scope, newScope, emptyScope
+
     , TypeAST(..), bitraverse, typeSubexprs
     , SchemeBinders(..)
     , Scheme(..)
-    , Err(..)
-    , V(..), lam, ($$), recVal, ($=), ($.)
-    , infer
-    , test, example1, example2, example3, example4, example5, example6
+
+    , T(..), V(..)
+
+    , recordType, recordFrom, (~>), tInst, intType
+    , lam, lambda, lambdaRecord
+    , recVal, global
+    , ($$), ($=), ($.), ($+), ($-)
+
+    , test
+    , example1, example2, example3, example4, example5, example6, example7
     , main
     ) where
 
@@ -46,7 +55,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.String (IsString(..))
 import           MapPretty ()
-import           Text.PrettyPrint (hcat, punctuate, Doc, (<+>), (<>), text)
+import           Text.PrettyPrint (fcat, hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           UF (UF)
 import qualified UF as UF
@@ -211,8 +220,31 @@ instance Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
     pPrintPrec _ _ (TVar name) = text "a" <> pPrint name
 
+infixr 4 ~>
+(~>) :: T 'TypeT -> T 'TypeT -> T 'TypeT
+a ~> b = T $ TFun a b
+
+recordFrom :: [(String, T 'TypeT)] -> T 'RecordT
+recordFrom [] = T TEmptyRecord
+recordFrom ((name, typ):fs) = T $ TRecExtend name typ $ recordFrom fs
+
+recordType :: [(String, T 'TypeT)] -> T 'TypeT
+recordType = T . TRecord . recordFrom
+
+tInst :: String -> T 'TypeT
+tInst = T . TInst
+
+intType :: T 'TypeT
+intType = tInst "Integer"
+
 lam :: String -> V -> V
 lam name body = V $ BLam $ Abs name body
+
+lambda :: String -> (V -> V) -> V
+lambda name body = lam name $ body (fromString name)
+
+lambdaRecord :: String -> [String] -> ([V] -> V) -> V
+lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
 
 infixl 4 $$
 ($$) :: V -> V -> V
@@ -230,11 +262,26 @@ recVal = foldr extend empty
 ($.) :: V -> String -> V
 x $. y = V $ BGetField $ GetField x y
 
+global :: String -> V
+global = V . BLeaf . LGlobal
+
+infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
+infixType a b c = recordType [("l", a), ("r", b)] ~> c
+
+infixApp :: String -> V -> V -> V
+infixApp name x y = global name $$ recVal [("l", x), ("r", y)]
+
+($+) :: V -> V -> V
+($+) = infixApp "+"
+
+($-) :: V -> V -> V
+($-) = infixApp "-"
+
 instance IsString V where
     fromString = V . BLeaf . LVar
 
 data Err
-    = DoesNotUnify
+    = DoesNotUnify Doc Doc
     | VarNotInScope String
     | OccursCheck
     | DuplicateFields [String]
@@ -244,9 +291,12 @@ intercalate :: Doc -> [Doc] -> Doc
 intercalate sep = hcat . punctuate sep
 
 instance Pretty Err where
-    pPrint DoesNotUnify = "DoesNotUnify"
-    pPrint (VarNotInScope name) = text name <+> "not in scope!"
-    pPrint OccursCheck = "OccursCheck"
+    pPrint (DoesNotUnify expected got) =
+        "expected:" <+> expected <+> "but got:" <+> got
+    pPrint (VarNotInScope name) =
+        text name <+> "not in scope!"
+    pPrint OccursCheck =
+        "OccursCheck"
     pPrint (DuplicateFields names) =
         "Duplicate fields in record:" <+>
         (intercalate ", " . map text) names
@@ -285,6 +335,8 @@ data TypeASTPosition s tag = TypeASTPosition
 type UFType s = UFTypeAST s 'TypeT
 type UFRecord s = UFTypeAST s 'RecordT
 newtype UFTypeAST s tag = TS { tsUF :: UF s (TypeASTPosition s tag) }
+instance Pretty (UFTypeAST s tag) where
+    pPrint _ = ".."
 
 type TVarBinders tag = Map (TVarName tag) (Constraints tag)
 
@@ -298,6 +350,9 @@ instance Monoid SchemeBinders where
         SchemeBinders
         (Map.unionWith mappend t0 t1)
         (Map.unionWith mappend r0 r1)
+
+nullBinders :: SchemeBinders -> Bool
+nullBinders (SchemeBinders a b) = Map.null a && Map.null b
 
 data Scheme tag = Scheme
     { schemeBinders :: SchemeBinders
@@ -320,12 +375,17 @@ instance Pretty SchemeBinders where
          map pPrintTV (Map.toList rtvs))
 
 instance Pretty (Scheme tag) where
-    pPrint (Scheme binders typ) = pPrint binders <> "." <+> pPrint typ
+    pPrint (Scheme binders typ)
+        | nullBinders binders = pPrint typ
+        | otherwise = pPrint binders <> "." <+> pPrint typ
 
 data Scope s = Scope
     { _scopeLocals :: Map String (UFType s)
     , _scopeGlobals :: Map String (Scheme 'TypeT)
     }
+
+newScope :: Map String (Scheme 'TypeT) -> Scope s
+newScope = Scope Map.empty
 
 emptyScope :: Scope s
 emptyScope = Scope Map.empty Map.empty
@@ -396,17 +456,17 @@ generalize t =
     & runWriterT
     <&> uncurry (flip Scheme)
 
-unifyMatch :: v -> Lens.Getting (Monoid.First a) v a -> Infer s a
-unifyMatch vTyp prism =
+unifyMatch :: Pretty v => Doc -> v -> Lens.Getting (Monoid.First a) v a -> Infer s a
+unifyMatch expected vTyp prism =
     case vTyp ^? prism of
-    Nothing -> throwError DoesNotUnify
+    Nothing -> throwError $ DoesNotUnify expected (pPrint vTyp)
     Just vcontent -> return vcontent
 
-unifyMatchEq :: Eq a => v -> a -> Lens.Getting (Monoid.First a) v a -> Infer s ()
-unifyMatchEq vTyp u prism =
+unifyMatchEq :: (Pretty v, Pretty a, Eq a) => Doc -> v -> a -> Lens.Getting (Monoid.First a) v a -> Infer s ()
+unifyMatchEq expected vTyp u prism =
     do
-        v <- unifyMatch vTyp prism
-        unless (u == v) $ throwError DoesNotUnify
+        v <- unifyMatch expected vTyp prism
+        unless (u == v) $ throwError $ DoesNotUnify (pPrint u) (pPrint vTyp)
 
 newtype PosHandler s tag = PosHandler { runPosHandler :: TypeASTPosition s tag -> Infer s () }
 
@@ -485,7 +545,11 @@ unflatten (FlatRecord mTail fields) =
 unifyClosedRecords :: ClosedRecord s -> ClosedRecord s -> Infer s ()
 unifyClosedRecords uFields vFields
     | Map.keysSet uFields == Map.keysSet vFields = return ()
-    | otherwise = throwError DoesNotUnify
+    | otherwise =
+          throwError $
+          DoesNotUnify
+          ("Record fields:" <+> pPrint (Map.keys uFields))
+          ("Record fields:" <+> pPrint (Map.keys vFields))
 
 unifyOpenRecord :: OpenRecord s -> ClosedRecord s -> Infer s ()
 unifyOpenRecord (uFields, uTail) vFields
@@ -493,7 +557,12 @@ unifyOpenRecord (uFields, uTail) vFields
           do
               tailVal <- unflatten $ FlatRecord Nothing uniqueVFields
               unify (\_ _ -> return ()) uTail tailVal
-    | otherwise = throwError DoesNotUnify
+    | otherwise =
+          throwError $
+          DoesNotUnify
+          ("Record with at least fields:" <+> pPrint (Map.keys uFields))
+          ("Record fields:" <+> pPrint (Map.keys vFields))
+
     where
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
@@ -569,14 +638,14 @@ unifyType =
     unify f
     where
         f (TInst uName) vTyp =
-            unifyMatchEq vTyp uName _TInst
+            unifyMatchEq "TInst" vTyp uName _TInst
         f (TRecord uRec) vTyp =
             do
-                vRec <- unifyMatch vTyp _TRecord
+                vRec <- unifyMatch "TRecord" vTyp _TRecord
                 unifyRecord uRec vRec
         f (TFun uArg uRes) vTyp =
             do
-                (vArg, vRes) <- unifyMatch vTyp _TFun
+                (vArg, vRes) <- unifyMatch "TFun" vTyp _TFun
                 unifyType uArg vArg
                 unifyType uRes vRes
 
@@ -645,15 +714,38 @@ infer scope (V v) =
     BRecExtend ext -> inferRecExtend scope ext
     BGetField ext -> inferGetField scope ext
 
-inferScheme :: V -> Either Err (Scheme 'TypeT)
-inferScheme x = runInfer $ infer emptyScope x >>= generalize
+inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
+inferScheme scope x = runInfer $ infer scope x >>= generalize
+
+forAll :: Int -> Int -> ([T 'TypeT] -> [T 'RecordT] -> T tag) -> Scheme tag
+forAll nTvs nRtvs mkType =
+    Scheme (SchemeBinders cTvs cRtvs) $ mkType (map TVar tvs) (map TVar rtvs)
+    where
+        cTvs = Map.fromList [ (tv, mempty) | tv <- tvs ]
+        cRtvs = Map.fromList [ (tv, mempty) | tv <- rtvs ]
+        tvs = map TVarName [1..nTvs]
+        rtvs = map TVarName [nTvs+1..nTvs+nRtvs]
+
+globals :: Map String (Scheme 'TypeT)
+globals =
+    mconcat
+    [ "+" ==> intInfix
+    , "-" ==> intInfix
+    ]
+    where
+        intInfix = forAll 0 0 $ \ [] [] -> infixType intType intType intType
+        (==>) = Map.singleton
+
+(<+?>) :: Doc -> Doc -> Doc
+x <+?> y = fcat [x, y]
 
 test :: V -> IO ()
 test x =
-    print $ pPrint x <+>
-    case inferScheme x of
+    print $ pPrint x <+?>
+    case inferScheme (newScope globals) x of
     Left err -> "causes type error:" <+> pPrint err
-    Right typ -> "::" <+> pPrint typ
+    Right typ -> " :: " <+> pPrint typ
+
 
 example1 :: V
 example1 = lam "x" $ lam "y" $ "x" $$ "y" $$ "y"
@@ -673,6 +765,10 @@ example5 = lam "x" $ ("x" $. "y") $$ ("x" $. "y")
 example6 :: V
 example6 = recVal [("x", recVal []), ("y", recVal [])]
 
+example7 :: V
+example7 =
+    lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
+
 main :: IO ()
 main =
     mapM_ test
@@ -682,4 +778,5 @@ main =
     , example4
     , example5
     , example6
+    , example7
     ]
