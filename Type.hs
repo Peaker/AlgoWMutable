@@ -18,6 +18,8 @@
 module Main
     ( Infer, runInfer
     , TypeAST(..), bitraverse, typeSubexprs
+    , SchemeBinders(..)
+    , Scheme(..)
     , Err(..)
     , V(..), lam, ($$), recVal, ($=), ($.)
     , infer
@@ -44,10 +46,11 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.String (IsString(..))
 import           MapPretty ()
-import           Text.PrettyPrint (hcat, punctuate)
-import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens, (<+>), (<>), text)
+import           Text.PrettyPrint (hcat, punctuate, Doc, (<+>), (<>), text)
+import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           UF (UF)
 import qualified UF as UF
+import           WriterT
 
 newtype Const a (b :: k) = Const { getConst :: a }
     deriving (Eq, Ord, Read, Show, Functor)
@@ -71,15 +74,15 @@ data ASTTagEquality t
 
 class IsTag t where
     caseTagOf :: ASTTagHandlers f -> f t
-    tagRefl :: proxy t -> ASTTagEquality t
+    tagRefl :: ASTTagEquality t
 
 instance IsTag 'TypeT where
     caseTagOf = atpType
-    tagRefl _ = ASTTagEqualsTypeT Refl
+    tagRefl = ASTTagEqualsTypeT Refl
 
 instance IsTag 'RecordT where
     caseTagOf = atpRecord
-    tagRefl _ = ASTTagEqualsRecordT Refl
+    tagRefl = ASTTagEqualsRecordT Refl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty)
@@ -104,7 +107,7 @@ bitraverse typ reco = \case
     TRecExtend n t r -> TRecExtend n <$> typ t <*> reco r
 
 typeSubexprs ::
-    Applicative f => (forall tag. ast tag -> f (ast' tag)) -> TypeAST t ast -> f (TypeAST t ast')
+    Applicative f => (forall tag. IsTag tag => ast tag -> f (ast' tag)) -> TypeAST t ast -> f (TypeAST t ast')
 typeSubexprs f = bitraverse f f
 
 typeSubexprsList :: TypeAST tag ast -> ([ast 'TypeT], [ast 'RecordT])
@@ -235,13 +238,16 @@ data Err
     | DuplicateFields [String]
     deriving (Show)
 
+intercalate :: Doc -> [Doc] -> Doc
+intercalate sep = hcat . punctuate sep
+
 instance Pretty Err where
     pPrint DoesNotUnify = "DoesNotUnify"
     pPrint (VarNotInScope name) = text name <+> "not in scope!"
     pPrint OccursCheck = "OccursCheck"
     pPrint (DuplicateFields names) =
         "Duplicate fields in record:" <+>
-        (hcat . punctuate ", " . map text) names
+        (intercalate ", " . map text) names
 
 newtype Infer s a = Infer { unInfer :: StateT Int (EitherT Err (ST s)) a }
     deriving (Functor, Applicative, Monad)
@@ -278,6 +284,41 @@ type UFType s = UFTypeAST s 'TypeT
 type UFRecord s = UFTypeAST s 'RecordT
 newtype UFTypeAST s tag = TS { tsUF :: UF s (TypeASTPosition s tag) }
 
+type TVarBinders tag = Map (TVarName tag) (Constraints tag)
+
+data SchemeBinders = SchemeBinders
+    { schemeTypeBinders :: TVarBinders 'TypeT
+    , schemeRecordBinders :: TVarBinders 'RecordT
+    }
+instance Monoid SchemeBinders where
+    mempty = SchemeBinders Map.empty Map.empty
+    mappend (SchemeBinders t0 r0) (SchemeBinders t1 r1) =
+        SchemeBinders
+        (Map.unionWith mappend t0 t1)
+        (Map.unionWith mappend r0 r1)
+
+data Scheme = Scheme
+    { schemeBinders :: SchemeBinders
+    , schemeType :: T 'TypeT
+    }
+
+pPrintTV :: (TVarName tag, Constraints tag) -> Doc
+pPrintTV (tv, constraints) = "∀a" <> pPrint tv <> suffix constraints
+    where
+        suffix :: Constraints tag -> Doc
+        suffix TypeConstraints = ""
+        suffix (RecordConstraints cs) =
+            "∉" <> (intercalate " " . map pPrint) (Set.toList cs)
+
+instance Pretty SchemeBinders where
+    pPrint (SchemeBinders tvs rtvs) =
+        intercalate " " $
+        (map pPrintTV (Map.toList tvs) ++
+         map pPrintTV (Map.toList rtvs))
+
+instance Pretty Scheme where
+    pPrint (Scheme binders typ) = pPrint binders <> "." <+> pPrint typ
+
 type Scope s = Map String (UFType s)
 
 freshTVarName :: Infer s (TVarName tag)
@@ -301,12 +342,25 @@ wrap = newPosition . Right
 getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
 getWrapper (TS r) = UF.find r & liftST
 
-deref :: UFTypeAST s tag -> Infer s (T tag)
+deref :: forall s tag. IsTag tag => UFTypeAST s tag -> WriterT SchemeBinders (Infer s) (T tag)
 deref ts =
-    ts & getWrapper >>= \(TypeASTPosition names typ) ->
+    lift (getWrapper ts) >>= \(TypeASTPosition names typ) ->
     case typ of
-    Left _ -> return $ TVar $ Set.findMin names
+    Left cs ->
+        do
+            let tvName = Set.findMin names
+            tell $
+                case (tagRefl :: ASTTagEquality tag) of
+                ASTTagEqualsTypeT Refl -> mempty { schemeTypeBinders = Map.singleton tvName cs }
+                ASTTagEqualsRecordT Refl -> mempty { schemeRecordBinders = Map.singleton tvName cs }
+            return $ TVar tvName
     Right t -> t & typeSubexprs deref <&> T
+
+generalize :: UFType s -> Infer s Scheme
+generalize t =
+    deref t
+    & runWriterT
+    <&> uncurry (flip Scheme)
 
 unifyMatch :: v -> Lens.Getting (Monoid.First a) v a -> Infer s a
 unifyMatch vTyp prism =
@@ -332,8 +386,9 @@ atAllPositions handlers =
         -- extensions on top
         recurse :: IsTag t => [UFTypeAST s t] -> Infer s ()
         recurse xs = mapM_ (getWrapper >=> go) xs
+        recurseBoth :: ([UFTypeAST s 'TypeT], [UFTypeAST s 'RecordT]) -> Infer s ()
         recurseBoth (types, records) = recurse types >> recurse records
-        go :: forall t. IsTag t => TypeASTPosition s t -> Infer s ()
+        go :: IsTag t => TypeASTPosition s t -> Infer s ()
         go pos@(TypeASTPosition _ mTyp) =
             do
                 runPosHandler (caseTagOf handlers) pos
@@ -346,11 +401,11 @@ occursCheck uNames pos = atAllPositions handlers pos
         handlers :: ASTTagHandlers (PosHandler s)
         handlers = ASTTagHandlers
             { atpType =
-                  case tagRefl pos of
+                  case (tagRefl :: ASTTagEquality tag) of
                   ASTTagEqualsTypeT Refl -> PosHandler verifyNoIntersect
                   ASTTagEqualsRecordT Refl -> PosHandler doNothing
             , atpRecord =
-                  case tagRefl pos of
+                  case (tagRefl :: ASTTagEquality tag) of
                   ASTTagEqualsRecordT Refl -> PosHandler verifyNoIntersect
                   ASTTagEqualsTypeT Refl -> PosHandler doNothing
             }
@@ -559,7 +614,7 @@ test x =
     Left err -> "causes type error:" <+> pPrint err
     Right typ -> "::" <+> pPrint typ
     where
-        etyp = runInfer $ infer mempty x >>= deref
+        etyp = runInfer $ infer mempty x >>= generalize
 
 example1 :: V
 example1 = lam "x" $ lam "y" $ "x" $$ "y" $$ "y"
