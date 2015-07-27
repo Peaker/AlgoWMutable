@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -15,36 +16,40 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
-module Main
+module Type
     ( Infer, runInfer, inferScheme, infer
     , Err(..)
     , Scope, newScope, emptyScope
 
+    , ASTTag(..)
     , TypeAST(..), bitraverse, typeSubexprs
     , SchemeBinders(..)
     , Scheme(..)
 
     , T(..), V(..)
 
-    , recordType, recordFrom, (~>), tInst, intType
+    , recordType, recordFrom, (~>), tInst
+    , intType, boolType
     , lam, lambda, lambdaRecord
-    , recVal, global
-    , ($$), ($=), ($.), ($+), ($-)
+    , recVal, global, litInt
+    , ($$), ($=), ($.), ($+), ($-), ($$:)
 
+    , forAll
     , test
     , example1, example2, example3, example4, example5, example6, example7
-    , main
+    , runTests
     ) where
 
-import           Data.Type.Equality
 import           Prelude.Compat hiding (abs)
 
+import           Control.DeepSeq (NFData(..))
+import           Data.Type.Equality
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Control.Monad (unless, (>=>))
 import           Control.Monad.ST (ST, runST)
-import           Control.Monad.State (StateT, evalStateT, modify, get)
+import           Control.Monad.State (StateT(..), evalStateT, modify, get)
 import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.Either
 import           Data.Foldable (sequenceA_)
@@ -54,6 +59,7 @@ import qualified Data.Monoid as Monoid
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.String (IsString(..))
+import           GHC.Generics (Generic)
 import           MapPretty ()
 import           Text.PrettyPrint (fcat, hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
@@ -94,14 +100,21 @@ instance IsTag 'RecordT where
     tagRefl = IsRecordT Refl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
-    deriving (Eq, Ord, Show, Pretty)
+    deriving (Eq, Ord, Show, Pretty, NFData)
 
 data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> Type ast
     TInst :: String -> Type ast
-    TRecord :: ast 'RecordT -> Type ast
+    TRecord :: !(ast 'RecordT) -> Type ast
     TEmptyRecord :: Record ast
-    TRecExtend :: String -> ast 'TypeT -> ast 'RecordT -> Record ast
+    TRecExtend :: String -> !(ast 'TypeT) -> !(ast 'RecordT) -> Record ast
+
+instance (NFData (ast 'TypeT), NFData (ast 'RecordT)) => NFData (TypeAST tag ast) where
+    rnf (TFun x y) = rnf x `seq` rnf y
+    rnf (TInst n) = rnf n
+    rnf (TRecord record) = rnf record
+    rnf TEmptyRecord = ()
+    rnf (TRecExtend n t r) = rnf n `seq` rnf t `seq` rnf r
 
 bitraverse ::
     Applicative f =>
@@ -165,12 +178,14 @@ data Leaf
     = LVar String
     | LGlobal String
     | LEmptyRecord
+    | LInt Int
     deriving (Show)
 
 instance Pretty Leaf where
     pPrint (LVar x) = text x
     pPrint (LGlobal x) = text x
     pPrint LEmptyRecord = "{}"
+    pPrint (LInt x) = pPrint x
 
 data Abs v = Abs String !v
     deriving (Show, Functor, Foldable, Traversable)
@@ -215,6 +230,8 @@ newtype V = V (Val V)
 data T tag
     = T (TypeAST tag T)
     | TVar (TVarName tag)
+    deriving (Generic)
+instance NFData (T tag)
 
 instance Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
@@ -235,7 +252,10 @@ tInst :: String -> T 'TypeT
 tInst = T . TInst
 
 intType :: T 'TypeT
-intType = tInst "Integer"
+intType = tInst "Int"
+
+boolType :: T 'TypeT
+boolType = T $ TInst "Bool"
 
 lam :: String -> V -> V
 lam name body = V $ BLam $ Abs name body
@@ -246,9 +266,15 @@ lambda name body = lam name $ body (fromString name)
 lambdaRecord :: String -> [String] -> ([V] -> V) -> V
 lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
 
+litInt :: Int -> V
+litInt = V . BLeaf . LInt
+
 infixl 4 $$
 ($$) :: V -> V -> V
 ($$) f a = V $ BApp $ App f a
+
+($$:) :: V -> [(String, V)] -> V
+func $$: fields = func $$ recVal fields
 
 recVal :: [(String, V)] -> V
 recVal = foldr extend empty
@@ -269,7 +295,7 @@ infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
 infixType a b c = recordType [("l", a), ("r", b)] ~> c
 
 infixApp :: String -> V -> V -> V
-infixApp name x y = global name $$ recVal [("l", x), ("r", y)]
+infixApp name x y = global name $$: [("l", x), ("r", y)]
 
 ($+) :: V -> V -> V
 ($+) = infixApp "+"
@@ -316,7 +342,11 @@ throwError = Infer . lift . left
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
-    RecordConstraints :: Set String -> Constraints 'RecordT
+    RecordConstraints :: !(Set String) -> Constraints 'RecordT
+
+instance NFData (Constraints tag) where
+    rnf TypeConstraints = ()
+    rnf (RecordConstraints cs) = rnf cs
 
 instance Monoid (Constraints 'TypeT) where
     mempty = TypeConstraints
@@ -343,7 +373,8 @@ type TVarBinders tag = Map (TVarName tag) (Constraints tag)
 data SchemeBinders = SchemeBinders
     { schemeTypeBinders :: TVarBinders 'TypeT
     , schemeRecordBinders :: TVarBinders 'RecordT
-    }
+    } deriving (Generic)
+instance NFData SchemeBinders
 instance Monoid SchemeBinders where
     mempty = SchemeBinders Map.empty Map.empty
     mappend (SchemeBinders t0 r0) (SchemeBinders t1 r1) =
@@ -357,7 +388,8 @@ nullBinders (SchemeBinders a b) = Map.null a && Map.null b
 data Scheme tag = Scheme
     { schemeBinders :: SchemeBinders
     , schemeType :: T tag
-    }
+    } deriving (Generic)
+instance NFData (Scheme tag)
 
 pPrintTV :: (TVarName tag, Constraints tag) -> Doc
 pPrintTV (tv, constraints) =
@@ -657,6 +689,7 @@ inferLeaf scope leaf =
         case lookupGlobal n scope of
         Just scheme -> instantiate scheme
         Nothing -> throwError $ VarNotInScope n
+    LInt _ -> wrap (TInst "Int")
     LVar n ->
         case lookupLocal n scope of
         Just typ -> return typ
@@ -769,8 +802,8 @@ example7 :: V
 example7 =
     lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
 
-main :: IO ()
-main =
+runTests :: IO ()
+runTests =
     mapM_ test
     [ example1
     , example2
