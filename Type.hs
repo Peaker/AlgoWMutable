@@ -333,6 +333,7 @@ newtype Infer s a = Infer { unInfer :: StateT Int (EitherT Err (ST s)) a }
 runInfer :: (forall s. Infer s a) -> Either Err a
 runInfer act = runST $ runEitherT $ (`evalStateT` 0) $ unInfer $ act
 
+{-# INLINE liftST #-}
 liftST :: ST s a -> Infer s a
 liftST = Infer . lift . lift
 
@@ -422,19 +423,24 @@ newScope = Scope Map.empty
 emptyScope :: Scope s
 emptyScope = Scope Map.empty Map.empty
 
+{-# INLINE lookupLocal #-}
 lookupLocal :: String -> Scope s -> Maybe (UFType s)
 lookupLocal str (Scope locals _) = Map.lookup str locals
 
+{-# INLINE lookupGlobal #-}
 lookupGlobal :: String -> Scope s -> Maybe (Scheme 'TypeT)
 lookupGlobal str (Scope _ globals) = Map.lookup str globals
 
+{-# INLINE insertLocal #-}
 insertLocal :: String -> UFType s -> Scope s -> Scope s
 insertLocal name typ (Scope locals globals) =
     Scope (Map.insert name typ locals) globals
 
+{-# INLINE freshTVarName #-}
 freshTVarName :: Infer s (TVarName tag)
 freshTVarName = modify (+1) >> get <&> TVarName & Infer
 
+{-# INLINE newPosition #-}
 newPosition ::
     Either (Constraints tag) (TypeAST tag (UFTypeAST s)) ->
     Infer s (UFTypeAST s tag)
@@ -444,9 +450,11 @@ newPosition t =
         TypeASTPosition (Set.singleton tvarName) t
             & liftST . UF.new <&> TS
 
+{-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (UFTypeAST s tag)
 freshTVar = newPosition . Left
 
+{-# INLINE wrap #-}
 wrap :: TypeAST tag (UFTypeAST s) -> Infer s (UFTypeAST s tag)
 wrap = newPosition . Right
 
