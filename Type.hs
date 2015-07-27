@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -13,9 +14,9 @@ module Main
     ( Infer, runInfer
     , TypeAST(..), bitraverse, typeSubexprs
     , Err(..)
-    , V(..), lam, ($$), emptyRec, ($=), ($.)
+    , V(..), lam, ($$), recVal, ($=), ($.)
     , infer
-    , test, example1, example2, example3, example4, example5
+    , test, example1, example2, example3, example4, example5, example6
     , main
     ) where
 
@@ -172,7 +173,10 @@ data T tag
 instance Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
     pPrintPrec _ _ (TVar names) =
-        text "a" <> (hcat . punctuate "," . map pPrint . Set.toList) names
+        text "a" <>
+        -- (hcat . punctuate "," . map pPrint . Set.toList)
+        (pPrint . Set.findMin)
+        names
 
 lam :: String -> V -> V
 lam name body = V $ BLam $ Abs name body
@@ -181,8 +185,11 @@ infixl 4 $$
 ($$) :: V -> V -> V
 ($$) f a = V $ BApp $ App f a
 
-emptyRec :: V
-emptyRec = V $ BLeaf LEmptyRecord
+recVal :: [(String, V)] -> V
+recVal = foldr extend empty
+    where
+        extend (name, val) rest = V $ BRecExtend (RecExtend name val rest)
+        empty = V $ BLeaf LEmptyRecord
 
 ($=) :: String -> V -> V -> V
 (x $= y) z = V $ BRecExtend $ RecExtend x y z
@@ -197,12 +204,16 @@ data Err
     = DoesNotUnify
     | VarNotInScope String
     | OccursCheck
+    | DuplicateFields [String]
     deriving (Show)
 
 instance Pretty Err where
     pPrint DoesNotUnify = "DoesNotUnify"
     pPrint (VarNotInScope name) = text name <+> "not in scope!"
     pPrint OccursCheck = "OccursCheck"
+    pPrint (DuplicateFields names) =
+        "Duplicate fields in record:" <+>
+        (hcat . punctuate ", " . map text) names
 
 newtype Infer s a = Infer { unInfer :: StateT Int (EitherT Err (ST s)) a }
     deriving (Functor, Applicative, Monad)
@@ -216,9 +227,23 @@ liftST = Infer . lift . lift
 throwError :: Err -> Infer s a
 throwError = Infer . lift . left
 
+data Constraints tag where
+    TypeConstraints :: Constraints TypeT
+    -- forbidden field set:
+    RecordConstraints :: Set String -> Constraints RecordT
+
+instance Monoid (Constraints TypeT) where
+    mempty = TypeConstraints
+    mappend _ _ = TypeConstraints
+
+instance Monoid (Constraints RecordT) where
+    mempty = RecordConstraints mempty
+    mappend (RecordConstraints x) (RecordConstraints y) =
+        RecordConstraints (x `mappend` y)
+
 data TypeASTPosition s tag = TypeASTPosition
     { _tastPosNames :: Set TVarName
-    , _tastPosType :: Maybe (TypeAST tag (UFTypeAST s))
+    , _tastPosType :: Either (Constraints tag) (TypeAST tag (UFTypeAST s))
     }
 
 type UFType s = UFTypeAST s TypeT
@@ -230,18 +255,20 @@ type Scope s = Map String (UFType s)
 freshTVarName :: Infer s TVarName
 freshTVarName = modify (+1) >> get <&> TVarName & Infer
 
-newPosition :: Maybe (TypeAST tag (UFTypeAST s)) -> Infer s (UFTypeAST s tag)
+newPosition ::
+    Either (Constraints tag) (TypeAST tag (UFTypeAST s)) ->
+    Infer s (UFTypeAST s tag)
 newPosition t =
     do
         tvarName <- freshTVarName
         TypeASTPosition (Set.singleton tvarName) t
             & liftST . UF.new <&> TS
 
-freshTVar :: Infer s (UFTypeAST s tag)
-freshTVar = newPosition Nothing
+freshTVar :: Constraints tag -> Infer s (UFTypeAST s tag)
+freshTVar = newPosition . Left
 
 wrap :: TypeAST tag (UFTypeAST s) -> Infer s (UFTypeAST s tag)
-wrap = newPosition . Just
+wrap = newPosition . Right
 
 getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
 getWrapper (TS r) = UF.find r & liftST
@@ -250,8 +277,8 @@ deref :: UFTypeAST s tag -> Infer s (T tag)
 deref ts =
     ts & getWrapper >>= \(TypeASTPosition names typ) ->
     case typ of
-    Nothing -> return $ TVar names
-    Just t -> t & typeSubexprs deref <&> T
+    Left _ -> return $ TVar names
+    Right t -> t & typeSubexprs deref <&> T
 
 unifyMatch :: v -> Lens.Getting (Monoid.First a) v a -> Infer s a
 unifyMatch vTyp prism =
@@ -277,7 +304,7 @@ occursCheck uNames = go
         go :: TypeASTPosition s tag -> Infer s ()
         go (TypeASTPosition vNames mTyp)
             | Set.null (uNames `Set.intersection` vNames) =
-                  mTyp & Lens.traverseOf_ Lens._Just (recurseBoth . typeSubexprsList)
+                  mTyp & Lens.traverseOf_ Lens._Right (recurseBoth . typeSubexprsList)
             | otherwise = throwError OccursCheck
 
 type RecordTail s = UFRecord s
@@ -299,8 +326,8 @@ flattenVal (TRecExtend n t r) =
     where
         flatten ts =
             getWrapper ts <&> _tastPosType >>= \case
-            Nothing -> return $ FlatRecord (Just ts) Map.empty
-            Just typ -> flattenVal typ
+            Left _ -> return $ FlatRecord (Just ts) Map.empty
+            Right typ -> flattenVal typ
 
 unflatten :: FlatRecord s -> Infer s (UFRecord s)
 unflatten (FlatRecord mTail fields) =
@@ -310,10 +337,7 @@ unflatten (FlatRecord mTail fields) =
             case mTail of
             Nothing -> wrap TEmptyRecord
             Just tailVal -> return tailVal
-        go ((name, typ):fs) =
-            go fs
-            <&> TRecExtend name typ
-            >>= wrap
+        go ((name, typ):fs) = go fs <&> TRecExtend name typ >>= wrap
 
 unifyClosedRecords :: ClosedRecord s -> ClosedRecord s -> Infer s ()
 unifyClosedRecords uFields vFields
@@ -334,7 +358,10 @@ unifyOpenRecord (uFields, uTail) vFields
 unifyOpenRecords :: OpenRecord s -> OpenRecord s -> Infer s ()
 unifyOpenRecords (uFields, uTail) (vFields, vTail) =
     do
-        commonRest <- freshTVar
+        commonRest <-
+            freshTVar $ RecordConstraints $
+            Map.keysSet uFields `Set.union`
+            Map.keysSet vFields
         uRest <- FlatRecord (Just commonRest) uniqueVFields & unflatten
         vRest <- FlatRecord (Just commonRest) uniqueUFields & unflatten
         unifyRecord uTail uRest
@@ -361,7 +388,23 @@ unifyRecord =
                     (Nothing, Just vTail) -> unifyOpenRecord (vFields, vTail) uFields
                     (Just uTail, Just vTail) -> unifyOpenRecords (uFields, uTail) (vFields, vTail)
 
+constraintsCheck :: Constraints tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
+constraintsCheck TypeConstraints _ = return ()
+constraintsCheck (RecordConstraints names) r =
+    do
+        FlatRecord mTail fields <- flattenVal r
+        let fieldsSet = Map.keysSet fields
+        let forbidden = Set.intersection fieldsSet names
+        unless (Set.null forbidden) $ throwError $ DuplicateFields $
+            Set.toList forbidden
+        case mTail of
+            Nothing -> return ()
+            Just rTail ->
+                freshTVar (RecordConstraints fieldsSet)
+                >>= unifyRecord rTail
+
 unify ::
+    Monoid (Constraints tag) =>
     (TypeAST tag (UFTypeAST s) ->
      TypeAST tag (UFTypeAST s) -> Infer s ()) ->
     UFTypeAST s tag -> UFTypeAST s tag -> Infer s ()
@@ -372,11 +415,11 @@ unify f u v =
     where
         g uw@(TypeASTPosition uNames uMTyp) vw@(TypeASTPosition vNames vMTyp) =
             case (uMTyp, vMTyp) of
-            (Nothing, Nothing) -> (Nothing, return ())
-            (Nothing, Just y) -> (Just y, occursCheck uNames vw)
-            (Just x, Nothing) -> (Just x, occursCheck vNames uw)
-            (Just x, Just y) -> (Just x, f x y)
-            & _1 %~ TypeASTPosition (uNames `Set.union` vNames)
+            (Left uCs, Left vCs) -> (Left (uCs `mappend` vCs), return ())
+            (Left uCs, Right y) -> (Right y, occursCheck uNames vw >> constraintsCheck uCs y)
+            (Right x, Left vCs) -> (Right x, occursCheck vNames uw >> constraintsCheck vCs x)
+            (Right x, Right y) -> (Right x, f x y)
+            & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
 unifyType :: UFType s -> UFType s -> Infer s ()
 unifyType =
@@ -406,7 +449,7 @@ inferLeaf scope leaf =
 inferLam :: Scope s -> Abs V -> Infer s (UFType s)
 inferLam scope (Abs n body) =
     do
-        nType <- freshTVar
+        nType <- freshTVar TypeConstraints
         resType <- infer (Map.insert n nType scope) body
         TFun nType resType & wrap
 
@@ -415,7 +458,7 @@ inferApp scope (App fun arg) =
     do
         funTyp <- infer scope fun
         argTyp <- infer scope arg
-        resTyp <- freshTVar
+        resTyp <- freshTVar TypeConstraints
 
         expectedFunTyp <- TFun argTyp resTyp & wrap
         unifyType expectedFunTyp funTyp
@@ -426,7 +469,7 @@ inferRecExtend scope (RecExtend name val rest) =
     do
         valTyp <- infer scope val
         restTyp <- infer scope rest
-        unknownRestFields <- freshTVar
+        unknownRestFields <- freshTVar $ RecordConstraints $ Set.singleton name
         expectedResTyp <- TRecord unknownRestFields & wrap
         unifyType expectedResTyp restTyp
         TRecExtend name valTyp unknownRestFields
@@ -436,10 +479,10 @@ inferRecExtend scope (RecExtend name val rest) =
 inferGetField :: Scope s -> GetField V -> Infer s (UFType s)
 inferGetField scope (GetField val name) =
     do
-        resTyp <- freshTVar
+        resTyp <- freshTVar TypeConstraints
         valTyp <- infer scope val
         expectedValTyp <-
-            freshTVar
+            freshTVar (RecordConstraints (Set.singleton name))
             <&> TRecExtend name resTyp
             >>= wrap
             >>= wrap . TRecord
@@ -468,23 +511,19 @@ example1 :: V
 example1 = lam "x" $ lam "y" $ "x" $$ "y" $$ "y"
 
 example2 :: V
-example2 =
-    lam "x" $
-    emptyRec
-    & "x" $= "x"
-    & "y" $= lam "x" "x"
+example2 = lam "x" $ recVal [] & "x" $= "x" & "y" $= lam "x" "x"
 
 example3 :: V
-example3 =
-    lam "x" $ ("x" $. "y") $$ (lam "a" "a")
+example3 = lam "x" $ ("x" $. "y") $$ (lam "a" "a")
 
 example4 :: V
-example4 =
-    lam "x" $ "x" $$ "x"
+example4 = lam "x" $ "x" $$ "x"
 
 example5 :: V
-example5 =
-    lam "x" $ ("x" $. "y") $$ ("x" $. "y")
+example5 = lam "x" $ ("x" $. "y") $$ ("x" $. "y")
+
+example6 :: V
+example6 = recVal [("x", recVal []), ("y", recVal [])]
 
 main :: IO ()
 main =
@@ -494,4 +533,5 @@ main =
     , example3
     , example4
     , example5
+    , example6
     ]
