@@ -200,15 +200,11 @@ newtype V = V (Val V)
 
 data T tag
     = T (TypeAST tag T)
-    | TVar (Set (TVarName tag))
+    | TVar (TVarName tag)
 
 instance Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
-    pPrintPrec _ _ (TVar names) =
-        text "a" <>
-        -- (hcat . punctuate "," . map pPrint . Set.toList)
-        (pPrint . Set.findMin)
-        names
+    pPrintPrec _ _ (TVar name) = text "a" <> pPrint name
 
 lam :: String -> V -> V
 lam name body = V $ BLam $ Abs name body
@@ -309,7 +305,7 @@ deref :: UFTypeAST s tag -> Infer s (T tag)
 deref ts =
     ts & getWrapper >>= \(TypeASTPosition names typ) ->
     case typ of
-    Left _ -> return $ TVar names
+    Left _ -> return $ TVar $ Set.findMin names
     Right t -> t & typeSubexprs deref <&> T
 
 unifyMatch :: v -> Lens.Getting (Monoid.First a) v a -> Infer s a
