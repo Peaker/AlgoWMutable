@@ -41,6 +41,7 @@ module Type
     , runTests
     ) where
 
+import           Data.STRef
 import           Prelude.Compat hiding (abs)
 
 import           Control.DeepSeq (NFData(..))
@@ -327,33 +328,33 @@ instance Pretty Err where
         (intercalate ", " . map text) names
 
 newtype Infer s a = Infer
-    { unInfer :: Int -> ST s (Either Err (Int, a)) }
+    { unInfer :: STRef s Int -> ST s (Either Err a) }
     deriving (Functor)
 instance Applicative (Infer s) where
     {-# INLINE pure #-}
-    pure x = Infer $ \s -> pure (Right (s, x))
+    pure x = Infer $ \_ -> pure (Right x)
     {-# INLINE (<*>) #-}
     Infer f <*> Infer x =
         Infer $ \s -> f s >>= \case
         Left err -> pure (Left err)
-        Right (s', fres) -> x s' >>= \case
+        Right fres -> x s >>= \case
             Left err -> pure (Left err)
-            Right (s'', xres) ->
-                pure (Right (s'', fres xres))
+            Right xres ->
+                pure (Right (fres xres))
 instance Monad (Infer s) where
     {-# INLINE return #-}
     return = pure
     {-# INLINE (>>=) #-}
     Infer act >>= f = Infer $ \s -> act s >>= \case
         Left err -> pure (Left err)
-        Right (s', x) -> unInfer (f x) s'
+        Right x -> unInfer (f x) s
 
 runInfer :: (forall s. Infer s a) -> Either Err a
-runInfer act = runST (unInfer act 0) <&> snd
+runInfer act = runST $ newSTRef 0 >>= unInfer act
 
 {-# INLINE liftST #-}
 liftST :: ST s a -> Infer s a
-liftST act = Infer $ \s -> act <&> Right . (,) s
+liftST act = Infer $ \_ -> act <&> Right
 
 throwError :: Err -> Infer s a
 throwError err = Infer $ \_ -> return $ Left err
@@ -361,8 +362,11 @@ throwError err = Infer $ \_ -> return $ Left err
 modify' :: (Int -> Int) -> Infer s Int
 modify' f =
     Infer $ \s ->
-    let !res = f s
-    in return $ Right (res, res)
+    do
+        old <- readSTRef s
+        let new = f old
+        writeSTRef s $! new
+        return (Right new)
 
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
