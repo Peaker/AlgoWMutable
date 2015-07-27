@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -6,9 +7,12 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Main
@@ -21,9 +25,9 @@ module Main
     , main
     ) where
 
+import           Data.Type.Equality
 import           Prelude.Compat hiding (abs)
 
-import           Control.Applicative (Const(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
@@ -45,12 +49,40 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens, (<+>),
 import           UF (UF)
 import qualified UF as UF
 
-newtype TVarName = TVarName { _tVarName :: Int }
-    deriving (Eq, Ord, Show, Pretty)
+newtype Const a (b :: k) = Const { getConst :: a }
+    deriving (Eq, Ord, Read, Show, Functor)
+
+instance Monoid a => Applicative (Const a) where
+    pure _ = Const mempty
+    Const x <*> Const y = Const (mappend x y)
 
 data ASTTag = TypeT | RecordT
 type Type = TypeAST 'TypeT
 type Record = TypeAST 'RecordT
+
+data ASTTagHandlers f = ASTTagHandlers
+    { atpType :: f 'TypeT
+    , atpRecord :: f 'RecordT
+    }
+
+data ASTTagEquality t
+    = ASTTagEqualsTypeT (t :~: 'TypeT)
+    | ASTTagEqualsRecordT (t :~: 'RecordT)
+
+class IsTag t where
+    caseTagOf :: ASTTagHandlers f -> f t
+    tagRefl :: proxy t -> ASTTagEquality t
+
+instance IsTag 'TypeT where
+    caseTagOf = atpType
+    tagRefl _ = ASTTagEqualsTypeT Refl
+
+instance IsTag 'RecordT where
+    caseTagOf = atpRecord
+    tagRefl _ = ASTTagEqualsRecordT Refl
+
+newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
+    deriving (Eq, Ord, Show, Pretty)
 
 data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> Type ast
@@ -168,7 +200,7 @@ newtype V = V (Val V)
 
 data T tag
     = T (TypeAST tag T)
-    | TVar (Set TVarName)
+    | TVar (Set (TVarName tag))
 
 instance Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
@@ -242,7 +274,7 @@ instance Monoid (Constraints 'RecordT) where
         RecordConstraints (x `mappend` y)
 
 data TypeASTPosition s tag = TypeASTPosition
-    { _tastPosNames :: Set TVarName
+    { _tastPosNames :: Set (TVarName tag)
     , _tastPosType :: Either (Constraints tag) (TypeAST tag (UFTypeAST s))
     }
 
@@ -252,7 +284,7 @@ newtype UFTypeAST s tag = TS { tsUF :: UF s (TypeASTPosition s tag) }
 
 type Scope s = Map String (UFType s)
 
-freshTVarName :: Infer s TVarName
+freshTVarName :: Infer s (TVarName tag)
 freshTVarName = modify (+1) >> get <&> TVarName & Infer
 
 newPosition ::
@@ -292,20 +324,46 @@ unifyMatchEq vTyp u prism =
         v <- unifyMatch vTyp prism
         unless (u == v) $ throwError DoesNotUnify
 
--- TODO: Broken
-occursCheck :: Set TVarName -> TypeASTPosition s tag -> Infer s ()
-occursCheck uNames = go
+newtype PosHandler s tag = PosHandler { runPosHandler :: TypeASTPosition s tag -> Infer s () }
+
+atAllPositions ::
+    forall s tag. IsTag tag => ASTTagHandlers (PosHandler s) ->
+    TypeASTPosition s tag -> Infer s ()
+atAllPositions handlers =
+    go
     where
+        -- Let generalization is disabled because of a mountain of
+        -- extensions on top
+        recurse :: IsTag t => [UFTypeAST s t] -> Infer s ()
         recurse xs = mapM_ (getWrapper >=> go) xs
-        -- TODO: Why is a typesig needed here?
-        recurseBoth :: ([UFType s], [UFRecord s]) -> Infer s ()
         recurseBoth (types, records) = recurse types >> recurse records
-        -- TODO: Why is a typesig needed here?
-        go :: TypeASTPosition s tag -> Infer s ()
-        go (TypeASTPosition vNames mTyp)
-            | Set.null (uNames `Set.intersection` vNames) =
-                  mTyp & Lens.traverseOf_ Lens._Right (recurseBoth . typeSubexprsList)
-            | otherwise = throwError OccursCheck
+        go :: forall t. IsTag t => TypeASTPosition s t -> Infer s ()
+        go pos@(TypeASTPosition _ mTyp) =
+            do
+                runPosHandler (caseTagOf handlers) pos
+                mTyp & Lens.traverseOf_ Lens._Right (recurseBoth . typeSubexprsList)
+
+occursCheck :: forall tag s. IsTag tag => Set (TVarName tag) -> TypeASTPosition s tag -> Infer s ()
+occursCheck uNames pos = atAllPositions handlers pos
+    where
+        -- TODO: How to do this cleanly?
+        handlers :: ASTTagHandlers (PosHandler s)
+        handlers = ASTTagHandlers
+            { atpType =
+                  case tagRefl pos of
+                  ASTTagEqualsTypeT Refl -> PosHandler verifyNoIntersect
+                  ASTTagEqualsRecordT Refl -> PosHandler doNothing
+            , atpRecord =
+                  case tagRefl pos of
+                  ASTTagEqualsRecordT Refl -> PosHandler verifyNoIntersect
+                  ASTTagEqualsTypeT Refl -> PosHandler doNothing
+            }
+        doNothing _ = return ()
+        verifyNoIntersect :: TypeASTPosition s tag -> Infer s ()
+        verifyNoIntersect (TypeASTPosition vNames _) =
+            unless (Set.null (uNames `Set.intersection`
+                              vNames)) $
+            throwError OccursCheck
 
 type RecordTail s = UFRecord s
 type RecordFields s = Map String (UFType s)
@@ -404,7 +462,7 @@ constraintsCheck (RecordConstraints names) r =
                 >>= unifyRecord rTail
 
 unify ::
-    Monoid (Constraints tag) =>
+    (IsTag tag, Monoid (Constraints tag)) =>
     (TypeAST tag (UFTypeAST s) ->
      TypeAST tag (UFTypeAST s) -> Infer s ()) ->
     UFTypeAST s tag -> UFTypeAST s tag -> Infer s ()
