@@ -35,6 +35,7 @@ module Type
     , recordType, compositeFrom, (~>), tInst
     , intType, boolType
     , lam, lambda, lambdaRecord
+    , absurd, case_, cases
     , recVal, global, litInt
     , ($$), ($=), ($.), ($+), ($-), ($$:)
 
@@ -66,7 +67,7 @@ import           Data.Type.Equality
 import qualified Data.UnionFind.ST as UF
 import           GHC.Generics (Generic)
 import           MapPretty ()
-import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, (<+>), (<>), text)
+import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, ($+$), (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           WriterT
 
@@ -223,6 +224,9 @@ data App v = App !v !v
 data RecExtend v = RecExtend String !v !v
     deriving (Show, Functor, Foldable, Traversable)
 
+data Case v = Case String !v !v
+    deriving (Show, Functor, Foldable, Traversable)
+
 data GetField v = GetField !v String
     deriving (Show, Functor, Foldable, Traversable)
 
@@ -233,6 +237,7 @@ data Val v
     = BLam (Abs v)
     | BApp (App v)
     | BRecExtend (RecExtend v)
+    | BCase (Case v)
     | BGetField (GetField v)
     | BInject (Inject v)
     | BLeaf Leaf
@@ -250,6 +255,11 @@ instance Pretty v => Pretty (Val v) where
         text name <> "="
         <> pPrintPrec level 8 val <+> "*"
         <+> pPrintPrec level 7 rest
+    pPrintPrec level prec (BCase (Case name handler restHandler)) =
+        maybeParens (prec > 7) $
+        text name <> "->"
+        <> pPrintPrec level 8 handler $+$
+        "_ ->" <+> pPrintPrec level 7 restHandler
     pPrintPrec level prec (BGetField (GetField val name)) =
         maybeParens (prec > 8) $
         pPrintPrec level 8 val <> "." <> text name
@@ -315,6 +325,12 @@ lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
 
 absurd :: V
 absurd = V $ BLeaf LAbsurd
+
+case_ :: String -> V -> V -> V
+case_ name handler restHandlers = V $ BCase $ Case name handler restHandlers
+
+cases :: [(String, V)] -> V
+cases = foldr (uncurry case_) absurd
 
 litInt :: Int -> V
 litInt = V . BLeaf . LInt
@@ -818,6 +834,28 @@ inferRecExtend scope (RecExtend name val rest) =
             & wrap
             >>= wrap . TRecord
 
+inferCase :: Scope s -> Case V -> Infer s (UFType s)
+inferCase scope (Case name handler restHandler) =
+    do
+        resType <- freshTVar TypeConstraints
+        let toResType x = TFun x resType & wrap
+
+        fieldType <- freshTVar TypeConstraints
+
+        handlerTyp <- infer scope handler
+        restHandlerTyp <- infer scope restHandler
+
+        sumTail <- freshTVar $ CompositeConstraints $ Set.singleton name
+
+        expectedHandlerTyp <- toResType fieldType
+        unifyType expectedHandlerTyp handlerTyp
+
+        expectedRestHandlerType <- TSum sumTail & wrap >>= toResType
+        unifyType expectedRestHandlerType restHandlerTyp
+
+        TCompositeExtend name fieldType sumTail
+            & wrap <&> TSum >>= wrap >>= toResType
+
 inferGetField :: Scope s -> GetField V -> Infer s (UFType s)
 inferGetField scope (GetField val name) =
     do
@@ -849,6 +887,7 @@ infer scope (V v) =
     BRecExtend ext -> inferRecExtend scope ext
     BGetField ext -> inferGetField scope ext
     BInject ext -> inferInject scope ext
+    BCase ext -> inferCase scope ext
 
 inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
 inferScheme scope x = runInfer $ infer scope x >>= generalize
@@ -920,7 +959,11 @@ example8 =
       $$ (f $$ "Nothing" .$ recVal [])
 
 example9 :: V
-example9 = absurd
+example9 =
+    cases
+    [ ("Nothing", lam "_" (litInt 0))
+    , ("Just", lambda "x" $ \x -> litInt 1 $+ x)
+    ]
 
 runTests :: IO ()
 runTests =
