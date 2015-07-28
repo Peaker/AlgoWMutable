@@ -31,7 +31,7 @@ module Type
 
     , T(..), V(..), AV(..)
 
-    , recordType, recordFrom, (~>), tInst
+    , recordType, compositeFrom, (~>), tInst
     , intType, boolType
     , lam, lambda, lambdaRecord
     , recVal, global, litInt
@@ -71,33 +71,46 @@ import           WriterT
 data CompositeTag = RecordC
 type RecordT = 'CompositeT 'RecordC
 data ASTTag = TypeT | CompositeT CompositeTag
-type Type = TypeAST 'TypeT
-type Record = TypeAST RecordT
 
-data ASTTagEquality t
-    = IsTypeT (t :~: 'TypeT)
-    | IsRecordT (t :~: RecordT)
+data CompositeTagEquality c
+    = IsRecordC (c :~: 'RecordC)
+
+data ASTTagEquality t where
+    IsTypeT :: (t :~: 'TypeT) -> ASTTagEquality t
+    IsCompositeT :: CompositeTagEquality c -> (t :~: 'CompositeT c) -> ASTTagEquality t
+
+class IsCompositeTag t where compositeTagRefl :: CompositeTagEquality t
+instance IsCompositeTag 'RecordC where compositeTagRefl = IsRecordC Refl
 
 class IsTag t where tagRefl :: ASTTagEquality t
 instance IsTag 'TypeT where tagRefl = IsTypeT Refl
-instance IsTag RecordT where tagRefl = IsRecordT Refl
+instance IsCompositeTag c => IsTag ('CompositeT c) where
+    tagRefl = IsCompositeT compositeTagRefl Refl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
 
 data TypeAST tag ast where
-    TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> Type ast
-    TInst :: String -> Type ast
-    TRecord :: !(ast RecordT) -> Type ast
-    TEmptyRecord :: Record ast
-    TRecExtend :: String -> !(ast 'TypeT) -> !(ast RecordT) -> Record ast
+    TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
+    TInst :: String -> TypeAST 'TypeT ast
+    TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
+    TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
+    TCompositeExtend ::
+        IsCompositeTag c => String -> !(ast 'TypeT) ->
+        !(ast ('CompositeT c)) ->
+        TypeAST ('CompositeT c) ast
 
-instance (NFData (ast 'TypeT), NFData (ast RecordT)) => NFData (TypeAST tag ast) where
+type Type = TypeAST 'TypeT
+type Record = TypeAST RecordT
+type Composite c = TypeAST ('CompositeT c)
+
+instance (NFData (ast 'TypeT), NFData (ast RecordT), NFData (ast tag)) =>
+         NFData (TypeAST tag ast) where
     rnf (TFun x y) = rnf x `seq` rnf y
     rnf (TInst n) = rnf n
     rnf (TRecord record) = rnf record
-    rnf TEmptyRecord = ()
-    rnf (TRecExtend n t r) = rnf n `seq` rnf t `seq` rnf r
+    rnf TEmptyComposite = ()
+    rnf (TCompositeExtend n t r) = rnf n `seq` rnf t `seq` rnf r
 
 bitraverse ::
     Applicative f =>
@@ -108,11 +121,15 @@ bitraverse typ reco = \case
     TFun a b -> TFun <$> typ a <*> typ b
     TInst n -> pure (TInst n)
     TRecord r -> TRecord <$> reco r
-    TEmptyRecord -> pure TEmptyRecord
-    TRecExtend n t r -> TRecExtend n <$> typ t <*> reco r
+    TEmptyComposite -> pure TEmptyComposite
+    TCompositeExtend n t (r :: ast ('CompositeT c)) ->
+        case compositeTagRefl :: CompositeTagEquality c of
+        IsRecordC Refl -> TCompositeExtend n <$> typ t <*> reco r
 
 typeSubexprs ::
-    Applicative f => (forall tag. IsTag tag => ast tag -> f (ast' tag)) -> TypeAST t ast -> f (TypeAST t ast')
+    forall f t ast ast'. (Applicative f, IsTag t) =>
+    (forall tag. IsTag tag => ast tag -> f (ast' tag)) ->
+    TypeAST t ast -> f (TypeAST t ast')
 typeSubexprs f = bitraverse f f
 
 _TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
@@ -130,17 +147,17 @@ _TRecord = Lens.prism' TRecord $ \case
     TRecord n -> Just n
     _ -> Nothing
 
-_TEmptyRecord :: Lens.Prism' (Record a) ()
-_TEmptyRecord = Lens.prism' (\() -> TEmptyRecord) $ \case
-    TEmptyRecord -> Just ()
+_TEmptyComposite :: Lens.Prism' (Record a) ()
+_TEmptyComposite = Lens.prism' (\() -> TEmptyComposite) $ \case
+    TEmptyComposite -> Just ()
     _ -> Nothing
 
-_TRecExtend :: Lens.Prism' (Record ast) (String, ast 'TypeT, ast RecordT)
-_TRecExtend = Lens.prism' (\(n, t, r) -> TRecExtend n t r) $ \case
-    TRecExtend n t r -> Just (n, t, r)
+_TCompositeExtend :: Lens.Prism' (Record ast) (String, ast 'TypeT, ast RecordT)
+_TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
+    TCompositeExtend n t r -> Just (n, t, r)
     _ -> Nothing
 
-instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (TypeAST tag ast) where
+instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (Type ast) where
     pPrintPrec level prec ast =
         case ast of
         TFun a b ->
@@ -148,8 +165,15 @@ instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (TypeAST tag ast)
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
         TInst name -> "#" <> text name
         TRecord r -> pPrintPrec level prec r
-        TEmptyRecord -> "{}"
-        TRecExtend n t r -> "{" <+> text n <+> ":" <+> pPrint t <+> "} *" <+> pPrint r
+
+instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (Record ast) where
+    pPrintPrec level prec ast =
+        case ast of
+        TEmptyComposite -> "{}"
+        TCompositeExtend n t r ->
+            maybeParens (prec > 1) $
+            "{" <+> text n <+> ":" <+> pPrintPrec level 0 t <+> "} *" <+> pPrintPrec level 1 r
+
 
 data Leaf
     = LVar String
@@ -223,7 +247,7 @@ data T tag
     deriving (Generic)
 instance NFData (T tag)
 
-instance Pretty (T tag) where
+instance Pretty (TypeAST tag T) => Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
     pPrintPrec _ _ (TVar name) = text "a" <> pPrint name
 
@@ -231,12 +255,12 @@ infixr 4 ~>
 (~>) :: T 'TypeT -> T 'TypeT -> T 'TypeT
 a ~> b = T $ TFun a b
 
-recordFrom :: [(String, T 'TypeT)] -> T RecordT
-recordFrom [] = T TEmptyRecord
-recordFrom ((name, typ):fs) = T $ TRecExtend name typ $ recordFrom fs
+compositeFrom :: IsCompositeTag c => [(String, T 'TypeT)] -> T ('CompositeT c)
+compositeFrom [] = T TEmptyComposite
+compositeFrom ((name, typ):fs) = T $ TCompositeExtend name typ $ compositeFrom fs
 
 recordType :: [(String, T 'TypeT)] -> T 'TypeT
-recordType = T . TRecord . recordFrom
+recordType = T . TRecord . compositeFrom
 
 tInst :: String -> T 'TypeT
 tInst = T . TInst
@@ -361,20 +385,20 @@ modify' f =
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
-    RecordConstraints :: !(Set String) -> Constraints RecordT
+    CompositeConstraints :: !(Set String) -> Constraints ('CompositeT c)
 
 instance NFData (Constraints tag) where
     rnf TypeConstraints = ()
-    rnf (RecordConstraints cs) = rnf cs
+    rnf (CompositeConstraints cs) = rnf cs
 
 instance Monoid (Constraints 'TypeT) where
     mempty = TypeConstraints
     mappend _ _ = TypeConstraints
 
-instance Monoid (Constraints RecordT) where
-    mempty = RecordConstraints mempty
-    mappend (RecordConstraints x) (RecordConstraints y) =
-        RecordConstraints (x `mappend` y)
+instance Monoid (Constraints ('CompositeT c)) where
+    mempty = CompositeConstraints mempty
+    mappend (CompositeConstraints x) (CompositeConstraints y) =
+        CompositeConstraints (x `mappend` y)
 
 data TypeASTPosition s tag = TypeASTPosition
     { __tastPosNames :: Set (TVarName tag)
@@ -382,7 +406,7 @@ data TypeASTPosition s tag = TypeASTPosition
     }
 
 type UFType s = UFTypeAST s 'TypeT
-type UFRecord s = UFTypeAST s RecordT
+type UFComposite c s = UFTypeAST s ('CompositeT c)
 newtype UFTypeAST s tag = TS { tsUF :: UF.Point s (TypeASTPosition s tag) }
 instance Pretty (UFTypeAST s tag) where
     pPrint _ = ".."
@@ -418,7 +442,7 @@ pPrintTV (tv, constraints) =
     where
         suffix :: Constraints tag -> Doc
         suffix TypeConstraints = ""
-        suffix (RecordConstraints cs) =
+        suffix (CompositeConstraints cs) =
             "∉" <> (intercalate " " . map pPrint) (Set.toList cs)
 
 instance Pretty SchemeBinders where
@@ -427,7 +451,7 @@ instance Pretty SchemeBinders where
         (map pPrintTV (Map.toList tvs) ++
          map pPrintTV (Map.toList rtvs))
 
-instance Pretty (Scheme tag) where
+instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
     pPrint (Scheme binders typ)
         | nullBinders binders = pPrint typ
         | otherwise = pPrint binders <> "." <+> pPrint typ
@@ -487,7 +511,7 @@ instantiate (Scheme (SchemeBinders typeVars recordVars) typ) =
             lookupTVar tvar =
                 case tagRefl :: ASTTagEquality t of
                 IsTypeT Refl -> typeUFs Map.! tvar
-                IsRecordT Refl -> recordUFs Map.! tvar
+                IsCompositeT (IsRecordC Refl) Refl -> recordUFs Map.! tvar
         let go :: forall t. IsTag t => T t -> Infer s (UFTypeAST s t)
             go (TVar tvarName) = return (lookupTVar tvarName)
             go (T typeAST) = typeSubexprs go typeAST >>= wrap
@@ -512,7 +536,7 @@ deref visited ts =
             tell $
                 case tagRefl :: ASTTagEquality tag of
                 IsTypeT Refl -> mempty { schemeTypeBinders = Map.singleton tvName cs }
-                IsRecordT Refl -> mempty { schemeRecordBinders = Map.singleton tvName cs }
+                IsCompositeT (IsRecordC Refl) Refl -> mempty { schemeRecordBinders = Map.singleton tvName cs }
             return $ TVar tvName
     Right t -> t & typeSubexprs (deref (Set.insert (_tVarName tvName) visited)) <&> T
 
@@ -534,40 +558,40 @@ unifyMatchEq expected vTyp u prism =
         v <- unifyMatch expected vTyp prism
         unless (u == v) $ throwError $ DoesNotUnify (pPrint u) (pPrint vTyp)
 
-type RecordTail s = UFRecord s
-type RecordFields s = Map String (UFType s)
-type ClosedRecord s = RecordFields s
-type OpenRecord s = (RecordFields s, RecordTail s)
+type CompositeTail c s = UFComposite c s
+type CompositeFields s = Map String (UFType s)
+type ClosedComposite s = CompositeFields s
+type OpenComposite c s = (CompositeFields s, CompositeTail c s)
 
-data FlatRecord s = FlatRecord
-    { __frMTail :: Maybe (RecordTail s)
-    , _frFields :: RecordFields s
+data FlatComposite c s = FlatComposite
+    { __frMTail :: Maybe (CompositeTail c s)
+    , _frFields :: CompositeFields s
     }
 
-Lens.makeLenses ''FlatRecord
+Lens.makeLenses ''FlatComposite
 
-flattenVal :: Record (UFTypeAST s) -> Infer s (FlatRecord s)
-flattenVal TEmptyRecord = return $ FlatRecord Nothing Map.empty
-flattenVal (TRecExtend n t r) =
+flattenVal :: Composite c (UFTypeAST s) -> Infer s (FlatComposite c s)
+flattenVal TEmptyComposite = return $ FlatComposite Nothing Map.empty
+flattenVal (TCompositeExtend n t r) =
     flatten r <&> frFields . Lens.at n ?~ t
     where
         flatten ts =
             getWrapper ts <&> _tastPosType >>= \case
-            Left _ -> return $ FlatRecord (Just ts) Map.empty
+            Left _ -> return $ FlatComposite (Just ts) Map.empty
             Right typ -> flattenVal typ
 
-unflatten :: FlatRecord s -> Infer s (UFRecord s)
-unflatten (FlatRecord mTail fields) =
+unflatten :: IsCompositeTag c => FlatComposite c s -> Infer s (UFComposite c s)
+unflatten (FlatComposite mTail fields) =
     Map.toList fields & go
     where
         go [] =
             case mTail of
-            Nothing -> wrap TEmptyRecord
+            Nothing -> wrap TEmptyComposite
             Just tailVal -> return tailVal
-        go ((name, typ):fs) = go fs <&> TRecExtend name typ >>= wrap
+        go ((name, typ):fs) = go fs <&> TCompositeExtend name typ >>= wrap
 
-unifyClosedRecords :: ClosedRecord s -> ClosedRecord s -> Infer s ()
-unifyClosedRecords uFields vFields
+unifyClosedComposites :: ClosedComposite s -> ClosedComposite s -> Infer s ()
+unifyClosedComposites uFields vFields
     | Map.keysSet uFields == Map.keysSet vFields = return ()
     | otherwise =
           throwError $
@@ -575,11 +599,11 @@ unifyClosedRecords uFields vFields
           ("Record fields:" <+> pPrint (Map.keys uFields))
           ("Record fields:" <+> pPrint (Map.keys vFields))
 
-unifyOpenRecord :: OpenRecord s -> ClosedRecord s -> Infer s ()
-unifyOpenRecord (uFields, uTail) vFields
+unifyOpenComposite :: IsCompositeTag c => OpenComposite c s -> ClosedComposite s -> Infer s ()
+unifyOpenComposite (uFields, uTail) vFields
     | Map.null uniqueUFields =
           do
-              tailVal <- unflatten $ FlatRecord Nothing uniqueVFields
+              tailVal <- unflatten $ FlatComposite Nothing uniqueVFields
               unify (\_ _ -> return ()) uTail tailVal
     | otherwise =
           throwError $
@@ -591,57 +615,57 @@ unifyOpenRecord (uFields, uTail) vFields
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
-unifyOpenRecords :: OpenRecord s -> OpenRecord s -> Infer s ()
-unifyOpenRecords (uFields, uTail) (vFields, vTail) =
+unifyOpenComposites :: IsCompositeTag c => OpenComposite c s -> OpenComposite c s -> Infer s ()
+unifyOpenComposites (uFields, uTail) (vFields, vTail) =
     do
         commonRest <-
-            freshTVar $ RecordConstraints $
+            freshTVar $ CompositeConstraints $
             Map.keysSet uFields `Set.union`
             Map.keysSet vFields
-        uRest <- FlatRecord (Just commonRest) uniqueVFields & unflatten
-        vRest <- FlatRecord (Just commonRest) uniqueUFields & unflatten
-        unifyRecord uTail uRest
-        unifyRecord vTail vRest
+        uRest <- FlatComposite (Just commonRest) uniqueVFields & unflatten
+        vRest <- FlatComposite (Just commonRest) uniqueUFields & unflatten
+        unifyComposite uTail uRest
+        unifyComposite vTail vRest
     where
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
-unifyRecord :: UFRecord s -> UFRecord s -> Infer s ()
-unifyRecord =
+unifyComposite :: IsCompositeTag c => UFComposite c s -> UFComposite c s -> Infer s ()
+unifyComposite =
     unify f
     where
         -- We already know we are record vals, and will re-read them
         -- via flatten, so no need for unify's read of these:
-        f TEmptyRecord TEmptyRecord = return ()
-        f (TRecExtend un ut ur) (TRecExtend vn vt vr)
+        f TEmptyComposite TEmptyComposite = return ()
+        f (TCompositeExtend un ut ur) (TCompositeExtend vn vt vr)
             | un == vn =
             do
                 unifyType ut vt
-                unifyRecord ur vr
+                unifyComposite ur vr
         f u v =
             do
-                FlatRecord uMTail uFields <- flattenVal u
-                FlatRecord vMTail vFields <- flattenVal v
+                FlatComposite uMTail uFields <- flattenVal u
+                FlatComposite vMTail vFields <- flattenVal v
                 Map.intersectionWith unifyType uFields vFields
                     & sequenceA_
                 case (uMTail, vMTail) of
-                    (Nothing, Nothing) -> unifyClosedRecords uFields vFields
-                    (Just uTail, Nothing) -> unifyOpenRecord (uFields, uTail) vFields
-                    (Nothing, Just vTail) -> unifyOpenRecord (vFields, vTail) uFields
-                    (Just uTail, Just vTail) -> unifyOpenRecords (uFields, uTail) (vFields, vTail)
+                    (Nothing, Nothing) -> unifyClosedComposites uFields vFields
+                    (Just uTail, Nothing) -> unifyOpenComposite (uFields, uTail) vFields
+                    (Nothing, Just vTail) -> unifyOpenComposite (vFields, vTail) uFields
+                    (Just uTail, Just vTail) -> unifyOpenComposites (uFields, uTail) (vFields, vTail)
 
 constraintsCheck :: Constraints tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
 constraintsCheck TypeConstraints _ = return ()
-constraintsCheck old@(RecordConstraints names) r =
+constraintsCheck old@(CompositeConstraints names) r =
     do
-        FlatRecord mTail fields <- flattenVal r
+        FlatComposite mTail fields <- flattenVal r
         let fieldsSet = Map.keysSet fields
         let forbidden = Set.intersection fieldsSet names
         unless (Set.null forbidden) $ throwError $ DuplicateFields $
             Set.toList forbidden
         case mTail of
             Nothing -> return ()
-            Just rTail -> setConstraints rTail (old `mappend` RecordConstraints fieldsSet)
+            Just rTail -> setConstraints rTail (old `mappend` CompositeConstraints fieldsSet)
 
 setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
@@ -687,7 +711,7 @@ unifyType =
         f (TRecord uRec) vTyp =
             do
                 vRec <- unifyMatch "TRecord" vTyp _TRecord
-                unifyRecord uRec vRec
+                unifyComposite uRec vRec
         f (TFun uArg uRes) vTyp =
             do
                 (vArg, vRes) <- unifyMatch "TFun" vTyp _TFun
@@ -697,7 +721,7 @@ unifyType =
 inferLeaf :: Scope s -> Leaf -> Infer s (UFType s)
 inferLeaf scope leaf =
     case leaf of
-    LEmptyRecord -> wrap TEmptyRecord >>= wrap . TRecord
+    LEmptyRecord -> wrap TEmptyComposite >>= wrap . TRecord
     LGlobal n ->
         case lookupGlobal n scope of
         Just scheme -> instantiate scheme
@@ -731,10 +755,10 @@ inferRecExtend scope (RecExtend name val rest) =
     do
         valTyp <- infer scope val
         restTyp <- infer scope rest
-        unknownRestFields <- freshTVar $ RecordConstraints $ Set.singleton name
+        unknownRestFields <- freshTVar $ CompositeConstraints $ Set.singleton name
         expectedResTyp <- TRecord unknownRestFields & wrap
         unifyType expectedResTyp restTyp
-        TRecExtend name valTyp unknownRestFields
+        TCompositeExtend name valTyp unknownRestFields
             & wrap
             >>= wrap . TRecord
 
@@ -744,8 +768,8 @@ inferGetField scope (GetField val name) =
         resTyp <- freshTVar TypeConstraints
         valTyp <- infer scope val
         expectedValTyp <-
-            freshTVar (RecordConstraints (Set.singleton name))
-            <&> TRecExtend name resTyp
+            freshTVar (CompositeConstraints (Set.singleton name))
+            <&> TCompositeExtend name resTyp
             >>= wrap
             >>= wrap . TRecord
         unifyType expectedValTyp valTyp
