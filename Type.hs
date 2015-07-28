@@ -40,7 +40,7 @@ module Type
 
     , forAll
     , test
-    , example1, example2, example3, example4, example5, example6, example7, example8
+    , example1, example2, example3, example4, example5, example6, example7, example8, example9
     , runTests
     ) where
 
@@ -203,6 +203,7 @@ data Leaf
     = LVar String
     | LGlobal String
     | LEmptyRecord
+    | LAbsurd
     | LInt Int
     deriving (Show)
 
@@ -210,6 +211,7 @@ instance Pretty Leaf where
     pPrint (LVar x) = text x
     pPrint (LGlobal x) = text x
     pPrint LEmptyRecord = "{}"
+    pPrint LAbsurd = "Absurd"
     pPrint (LInt x) = pPrint x
 
 data Abs v = Abs String !v
@@ -310,6 +312,9 @@ lambda name body = lam name $ body (fromString name)
 
 lambdaRecord :: String -> [String] -> ([V] -> V) -> V
 lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
+
+absurd :: V
+absurd = V $ BLeaf LAbsurd
 
 litInt :: Int -> V
 litInt = V . BLeaf . LInt
@@ -768,6 +773,11 @@ inferLeaf :: Scope s -> Leaf -> Infer s (UFType s)
 inferLeaf scope leaf =
     case leaf of
     LEmptyRecord -> wrap TEmptyComposite >>= wrap . TRecord
+    LAbsurd ->
+        do
+            res <- freshTVar mempty
+            emptySum <- wrap TEmptyComposite >>= wrap . TSum
+            TFun emptySum res & wrap
     LGlobal n ->
         case lookupGlobal n scope of
         Just scheme -> instantiate scheme
@@ -909,6 +919,9 @@ example8 =
     g $$ (f $$ "Just" .$ x)
       $$ (f $$ "Nothing" .$ recVal [])
 
+example9 :: V
+example9 = absurd
+
 runTests :: IO ()
 runTests =
     mapM_ test
@@ -920,4 +933,5 @@ runTests =
     , example6
     , example7
     , example8
+    , example9
     ]
