@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeOperators #-}
@@ -67,17 +68,19 @@ import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, (<+>), (
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           WriterT
 
-data ASTTag = TypeT | RecordT
+data CompositeTag = RecordC
+type RecordT = 'CompositeT 'RecordC
+data ASTTag = TypeT | CompositeT CompositeTag
 type Type = TypeAST 'TypeT
-type Record = TypeAST 'RecordT
+type Record = TypeAST RecordT
 
 data ASTTagEquality t
     = IsTypeT (t :~: 'TypeT)
-    | IsRecordT (t :~: 'RecordT)
+    | IsRecordT (t :~: RecordT)
 
 class IsTag t where tagRefl :: ASTTagEquality t
 instance IsTag 'TypeT where tagRefl = IsTypeT Refl
-instance IsTag 'RecordT where tagRefl = IsRecordT Refl
+instance IsTag RecordT where tagRefl = IsRecordT Refl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
@@ -85,11 +88,11 @@ newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
 data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> Type ast
     TInst :: String -> Type ast
-    TRecord :: !(ast 'RecordT) -> Type ast
+    TRecord :: !(ast RecordT) -> Type ast
     TEmptyRecord :: Record ast
-    TRecExtend :: String -> !(ast 'TypeT) -> !(ast 'RecordT) -> Record ast
+    TRecExtend :: String -> !(ast 'TypeT) -> !(ast RecordT) -> Record ast
 
-instance (NFData (ast 'TypeT), NFData (ast 'RecordT)) => NFData (TypeAST tag ast) where
+instance (NFData (ast 'TypeT), NFData (ast RecordT)) => NFData (TypeAST tag ast) where
     rnf (TFun x y) = rnf x `seq` rnf y
     rnf (TInst n) = rnf n
     rnf (TRecord record) = rnf record
@@ -99,7 +102,7 @@ instance (NFData (ast 'TypeT), NFData (ast 'RecordT)) => NFData (TypeAST tag ast
 bitraverse ::
     Applicative f =>
     (ast 'TypeT -> f (ast' 'TypeT)) ->
-    (ast 'RecordT -> f (ast' 'RecordT)) ->
+    (ast RecordT -> f (ast' RecordT)) ->
     TypeAST tag ast -> f (TypeAST tag ast')
 bitraverse typ reco = \case
     TFun a b -> TFun <$> typ a <*> typ b
@@ -122,7 +125,7 @@ _TInst = Lens.prism' TInst $ \case
     TInst n -> Just n
     _ -> Nothing
 
-_TRecord :: Lens.Prism' (Type ast) (ast 'RecordT)
+_TRecord :: Lens.Prism' (Type ast) (ast RecordT)
 _TRecord = Lens.prism' TRecord $ \case
     TRecord n -> Just n
     _ -> Nothing
@@ -132,12 +135,12 @@ _TEmptyRecord = Lens.prism' (\() -> TEmptyRecord) $ \case
     TEmptyRecord -> Just ()
     _ -> Nothing
 
-_TRecExtend :: Lens.Prism' (Record ast) (String, ast 'TypeT, ast 'RecordT)
+_TRecExtend :: Lens.Prism' (Record ast) (String, ast 'TypeT, ast RecordT)
 _TRecExtend = Lens.prism' (\(n, t, r) -> TRecExtend n t r) $ \case
     TRecExtend n t r -> Just (n, t, r)
     _ -> Nothing
 
-instance (Pretty (ast 'TypeT), Pretty (ast 'RecordT)) => Pretty (TypeAST tag ast) where
+instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (TypeAST tag ast) where
     pPrintPrec level prec ast =
         case ast of
         TFun a b ->
@@ -228,7 +231,7 @@ infixr 4 ~>
 (~>) :: T 'TypeT -> T 'TypeT -> T 'TypeT
 a ~> b = T $ TFun a b
 
-recordFrom :: [(String, T 'TypeT)] -> T 'RecordT
+recordFrom :: [(String, T 'TypeT)] -> T RecordT
 recordFrom [] = T TEmptyRecord
 recordFrom ((name, typ):fs) = T $ TRecExtend name typ $ recordFrom fs
 
@@ -358,7 +361,7 @@ modify' f =
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
-    RecordConstraints :: !(Set String) -> Constraints 'RecordT
+    RecordConstraints :: !(Set String) -> Constraints RecordT
 
 instance NFData (Constraints tag) where
     rnf TypeConstraints = ()
@@ -368,7 +371,7 @@ instance Monoid (Constraints 'TypeT) where
     mempty = TypeConstraints
     mappend _ _ = TypeConstraints
 
-instance Monoid (Constraints 'RecordT) where
+instance Monoid (Constraints RecordT) where
     mempty = RecordConstraints mempty
     mappend (RecordConstraints x) (RecordConstraints y) =
         RecordConstraints (x `mappend` y)
@@ -379,7 +382,7 @@ data TypeASTPosition s tag = TypeASTPosition
     }
 
 type UFType s = UFTypeAST s 'TypeT
-type UFRecord s = UFTypeAST s 'RecordT
+type UFRecord s = UFTypeAST s RecordT
 newtype UFTypeAST s tag = TS { tsUF :: UF.Point s (TypeASTPosition s tag) }
 instance Pretty (UFTypeAST s tag) where
     pPrint _ = ".."
@@ -390,7 +393,7 @@ type TVarBinders tag = Map (TVarName tag) (Constraints tag)
 
 data SchemeBinders = SchemeBinders
     { schemeTypeBinders :: TVarBinders 'TypeT
-    , schemeRecordBinders :: TVarBinders 'RecordT
+    , schemeRecordBinders :: TVarBinders RecordT
     } deriving (Generic)
 instance NFData SchemeBinders
 instance Monoid SchemeBinders where
@@ -760,7 +763,7 @@ infer scope (V v) =
 inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
 inferScheme scope x = runInfer $ infer scope x >>= generalize
 
-forAll :: Int -> Int -> ([T 'TypeT] -> [T 'RecordT] -> T tag) -> Scheme tag
+forAll :: Int -> Int -> ([T 'TypeT] -> [T RecordT] -> T tag) -> Scheme tag
 forAll nTvs nRtvs mkType =
     Scheme (SchemeBinders cTvs cRtvs) $ mkType (map TVar tvs) (map TVar rtvs)
     where
