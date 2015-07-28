@@ -23,6 +23,7 @@ module Type
     , Err(..)
     , Scope, newScope, emptyScope
 
+    , CompositeTag(..), RecordT
     , ASTTag(..)
     , Type, Record
     , TypeAST(..), bitraverse, typeSubexprs
@@ -56,6 +57,7 @@ import           Data.Foldable (sequenceA_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
+import           Data.Proxy (Proxy(..))
 import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
@@ -68,19 +70,28 @@ import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, (<+>), (
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           WriterT
 
-data CompositeTag = RecordC
+data CompositeTag = RecordC | SumC
 type RecordT = 'CompositeT 'RecordC
+type SumT = 'CompositeT 'SumC
 data ASTTag = TypeT | CompositeT CompositeTag
 
 data CompositeTagEquality c
     = IsRecordC (c :~: 'RecordC)
+    | IsSumC (c :~: 'SumC)
 
 data ASTTagEquality t where
     IsTypeT :: (t :~: 'TypeT) -> ASTTagEquality t
     IsCompositeT :: CompositeTagEquality c -> (t :~: 'CompositeT c) -> ASTTagEquality t
 
-class IsCompositeTag t where compositeTagRefl :: CompositeTagEquality t
-instance IsCompositeTag 'RecordC where compositeTagRefl = IsRecordC Refl
+class IsCompositeTag t where
+    compositeTagRefl :: CompositeTagEquality t
+    compositeChar :: Proxy t -> Char
+instance IsCompositeTag 'RecordC where
+    compositeTagRefl = IsRecordC Refl
+    compositeChar _ = '*'
+instance IsCompositeTag 'SumC where
+    compositeTagRefl = IsSumC Refl
+    compositeChar _ = '+'
 
 class IsTag t where tagRefl :: ASTTagEquality t
 instance IsTag 'TypeT where tagRefl = IsTypeT Refl
@@ -94,6 +105,7 @@ data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
     TInst :: String -> TypeAST 'TypeT ast
     TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
+    TSum :: !(ast SumT) -> Type ast
     TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
     TCompositeExtend ::
         IsCompositeTag c => String -> !(ast 'TypeT) ->
@@ -104,11 +116,12 @@ type Type = TypeAST 'TypeT
 type Record = TypeAST RecordT
 type Composite c = TypeAST ('CompositeT c)
 
-instance (NFData (ast 'TypeT), NFData (ast RecordT), NFData (ast tag)) =>
+instance (NFData (ast 'TypeT), NFData (ast RecordT), NFData (ast SumT), NFData (ast tag)) =>
          NFData (TypeAST tag ast) where
     rnf (TFun x y) = rnf x `seq` rnf y
     rnf (TInst n) = rnf n
     rnf (TRecord record) = rnf record
+    rnf (TSum s) = rnf s
     rnf TEmptyComposite = ()
     rnf (TCompositeExtend n t r) = rnf n `seq` rnf t `seq` rnf r
 
@@ -116,21 +129,25 @@ bitraverse ::
     Applicative f =>
     (ast 'TypeT -> f (ast' 'TypeT)) ->
     (ast RecordT -> f (ast' RecordT)) ->
+    (ast SumT -> f (ast' SumT)) ->
     TypeAST tag ast -> f (TypeAST tag ast')
-bitraverse typ reco = \case
+bitraverse typ reco su = \case
     TFun a b -> TFun <$> typ a <*> typ b
     TInst n -> pure (TInst n)
     TRecord r -> TRecord <$> reco r
+    TSum s -> TSum <$> su s
     TEmptyComposite -> pure TEmptyComposite
     TCompositeExtend n t (r :: ast ('CompositeT c)) ->
+        TCompositeExtend n <$> typ t <*>
         case compositeTagRefl :: CompositeTagEquality c of
-        IsRecordC Refl -> TCompositeExtend n <$> typ t <*> reco r
+        IsRecordC Refl -> reco r
+        IsSumC Refl -> su r
 
 typeSubexprs ::
     forall f t ast ast'. (Applicative f, IsTag t) =>
     (forall tag. IsTag tag => ast tag -> f (ast' tag)) ->
     TypeAST t ast -> f (TypeAST t ast')
-typeSubexprs f = bitraverse f f
+typeSubexprs f = bitraverse f f f
 
 _TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
@@ -147,6 +164,11 @@ _TRecord = Lens.prism' TRecord $ \case
     TRecord n -> Just n
     _ -> Nothing
 
+_TSum :: Lens.Prism' (Type ast) (ast SumT)
+_TSum = Lens.prism' TSum $ \case
+    TSum n -> Just n
+    _ -> Nothing
+
 _TEmptyComposite :: Lens.Prism' (Record a) ()
 _TEmptyComposite = Lens.prism' (\() -> TEmptyComposite) $ \case
     TEmptyComposite -> Just ()
@@ -157,7 +179,7 @@ _TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
     TCompositeExtend n t r -> Just (n, t, r)
     _ -> Nothing
 
-instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (Type ast) where
+instance (Pretty (ast 'TypeT), Pretty (ast RecordT), Pretty (ast SumT)) => Pretty (Type ast) where
     pPrintPrec level prec ast =
         case ast of
         TFun a b ->
@@ -165,14 +187,16 @@ instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (Type ast) where
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
         TInst name -> "#" <> text name
         TRecord r -> pPrintPrec level prec r
+        TSum s -> pPrintPrec level prec s
 
-instance (Pretty (ast 'TypeT), Pretty (ast RecordT)) => Pretty (Record ast) where
+instance (IsCompositeTag c, Pretty (ast 'TypeT), Pretty (ast ('CompositeT c))) => Pretty (Composite c ast) where
     pPrintPrec level prec ast =
         case ast of
         TEmptyComposite -> "{}"
         TCompositeExtend n t r ->
             maybeParens (prec > 1) $
-            "{" <+> text n <+> ":" <+> pPrintPrec level 0 t <+> "} *" <+> pPrintPrec level 1 r
+            "{" <+> text n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+>
+            text [compositeChar (Proxy :: Proxy c)] <+> pPrintPrec level 1 r
 
 
 data Leaf
@@ -418,17 +442,19 @@ type TVarBinders tag = Map (TVarName tag) (Constraints tag)
 data SchemeBinders = SchemeBinders
     { schemeTypeBinders :: TVarBinders 'TypeT
     , schemeRecordBinders :: TVarBinders RecordT
+    , schemeSumBinders :: TVarBinders SumT
     } deriving (Generic)
 instance NFData SchemeBinders
 instance Monoid SchemeBinders where
-    mempty = SchemeBinders Map.empty Map.empty
-    mappend (SchemeBinders t0 r0) (SchemeBinders t1 r1) =
+    mempty = SchemeBinders Map.empty Map.empty Map.empty
+    mappend (SchemeBinders t0 r0 s0) (SchemeBinders t1 r1 s1) =
         SchemeBinders
         (Map.unionWith mappend t0 t1)
         (Map.unionWith mappend r0 r1)
+        (Map.unionWith mappend s0 s1)
 
 nullBinders :: SchemeBinders -> Bool
-nullBinders (SchemeBinders a b) = Map.null a && Map.null b
+nullBinders (SchemeBinders a b c) = Map.null a && Map.null b && Map.null c
 
 data Scheme tag = Scheme
     { schemeBinders :: SchemeBinders
@@ -446,10 +472,11 @@ pPrintTV (tv, constraints) =
             "∉" <> (intercalate " " . map pPrint) (Set.toList cs)
 
 instance Pretty SchemeBinders where
-    pPrint (SchemeBinders tvs rtvs) =
+    pPrint (SchemeBinders tvs rtvs stvs) =
         intercalate " " $
         (map pPrintTV (Map.toList tvs) ++
-         map pPrintTV (Map.toList rtvs))
+         map pPrintTV (Map.toList rtvs) ++
+         map pPrintTV (Map.toList stvs))
 
 instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
     pPrint (Scheme binders typ)
@@ -503,15 +530,17 @@ wrap :: TypeAST tag (UFTypeAST s) -> Infer s (UFTypeAST s tag)
 wrap = newPosition . Right
 
 instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (UFTypeAST s tag)
-instantiate (Scheme (SchemeBinders typeVars recordVars) typ) =
+instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
     do
         typeUFs <- traverse freshTVar typeVars
         recordUFs <- traverse freshTVar recordVars
+        sumUFs <- traverse freshTVar sumVars
         let lookupTVar :: forall t. IsTag t => TVarName t -> UFTypeAST s t
             lookupTVar tvar =
                 case tagRefl :: ASTTagEquality t of
                 IsTypeT Refl -> typeUFs Map.! tvar
                 IsCompositeT (IsRecordC Refl) Refl -> recordUFs Map.! tvar
+                IsCompositeT (IsSumC Refl) Refl -> sumUFs Map.! tvar
         let go :: forall t. IsTag t => T t -> Infer s (UFTypeAST s t)
             go (TVar tvarName) = return (lookupTVar tvarName)
             go (T typeAST) = typeSubexprs go typeAST >>= wrap
@@ -535,9 +564,12 @@ deref visited ts =
         do
             tell $
                 case tagRefl :: ASTTagEquality tag of
-                IsTypeT Refl -> mempty { schemeTypeBinders = Map.singleton tvName cs }
-                IsCompositeT (IsRecordC Refl) Refl -> mempty { schemeRecordBinders = Map.singleton tvName cs }
+                IsTypeT Refl -> mempty { schemeTypeBinders = binders }
+                IsCompositeT (IsRecordC Refl) Refl -> mempty { schemeRecordBinders = binders }
+                IsCompositeT (IsSumC Refl) Refl -> mempty { schemeSumBinders = binders }
             return $ TVar tvName
+        where
+            binders = Map.singleton tvName cs
     Right t -> t & typeSubexprs (deref (Set.insert (_tVarName tvName) visited)) <&> T
 
 generalize :: UFType s -> Infer s (Scheme 'TypeT)
@@ -712,6 +744,10 @@ unifyType =
             do
                 vRec <- unifyMatch "TRecord" vTyp _TRecord
                 unifyComposite uRec vRec
+        f (TSum uSum) vTyp =
+            do
+                vSum <- unifyMatch "TSum" vTyp _TSum
+                unifyComposite uSum vSum
         f (TFun uArg uRes) vTyp =
             do
                 (vArg, vRes) <- unifyMatch "TFun" vTyp _TFun
@@ -787,14 +823,20 @@ infer scope (V v) =
 inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
 inferScheme scope x = runInfer $ infer scope x >>= generalize
 
-forAll :: Int -> Int -> ([T 'TypeT] -> [T RecordT] -> T tag) -> Scheme tag
-forAll nTvs nRtvs mkType =
-    Scheme (SchemeBinders cTvs cRtvs) $ mkType (map TVar tvs) (map TVar rtvs)
+forAll ::
+    Int -> Int -> Int ->
+    ([T 'TypeT] -> [T RecordT] -> [T SumT] -> T tag) ->
+    Scheme tag
+forAll nTvs nRtvs nStvs mkType =
+    Scheme (SchemeBinders cTvs cRtvs cStvs) $
+    mkType (map TVar tvs) (map TVar rtvs) (map TVar stvs)
     where
         cTvs = Map.fromList [ (tv, mempty) | tv <- tvs ]
         cRtvs = Map.fromList [ (tv, mempty) | tv <- rtvs ]
+        cStvs = Map.fromList [ (tv, mempty) | tv <- stvs ]
         tvs = map TVarName [1..nTvs]
         rtvs = map TVarName [nTvs+1..nTvs+nRtvs]
+        stvs = map TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
 
 globals :: Map String (Scheme 'TypeT)
 globals =
@@ -803,7 +845,7 @@ globals =
     , "-" ==> intInfix
     ]
     where
-        intInfix = forAll 0 0 $ \ [] [] -> infixType intType intType intType
+        intInfix = forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
         (==>) = Map.singleton
 
 (<+?>) :: Doc -> Doc -> Doc
