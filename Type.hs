@@ -40,7 +40,7 @@ module Type
 
     , forAll
     , test
-    , example1, example2, example3, example4, example5, example6, example7
+    , example1, example2, example3, example4, example5, example6, example7, example8
     , runTests
     ) where
 
@@ -224,11 +224,15 @@ data RecExtend v = RecExtend String !v !v
 data GetField v = GetField !v String
     deriving (Show, Functor, Foldable, Traversable)
 
+data Inject v = Inject String !v
+    deriving (Show, Functor, Foldable, Traversable)
+
 data Val v
     = BLam (Abs v)
     | BApp (App v)
     | BRecExtend (RecExtend v)
     | BGetField (GetField v)
+    | BInject (Inject v)
     | BLeaf Leaf
     deriving (Show, Functor, Foldable, Traversable)
 
@@ -247,6 +251,9 @@ instance Pretty v => Pretty (Val v) where
     pPrintPrec level prec (BGetField (GetField val name)) =
         maybeParens (prec > 8) $
         pPrintPrec level 8 val <> "." <> text name
+    pPrintPrec level prec (BInject (Inject name val)) =
+        maybeParens (prec > 8) $
+        text name <+> pPrintPrec level 8 val
     pPrintPrec level prec (BLeaf leaf) = pPrintPrec level prec leaf
 
 newtype V = V (Val V)
@@ -325,6 +332,9 @@ recVal = foldr extend empty
 
 ($.) :: V -> String -> V
 x $. y = V $ BGetField $ GetField x y
+
+(.$) :: String -> V -> V
+x .$ y = V $ BInject $ Inject x y
 
 global :: String -> V
 global = V . BLeaf . LGlobal
@@ -811,6 +821,15 @@ inferGetField scope (GetField val name) =
         unifyType expectedValTyp valTyp
         return resTyp
 
+inferInject :: Scope s -> Inject V -> Infer s (UFType s)
+inferInject scope (Inject name val) =
+    do
+        valTyp <- infer scope val
+        freshTVar (CompositeConstraints (Set.singleton name))
+            <&> TCompositeExtend name valTyp
+            >>= wrap
+            >>= wrap . TSum
+
 infer :: Scope s -> V -> Infer s (UFType s)
 infer scope (V v) =
     case v of
@@ -819,6 +838,7 @@ infer scope (V v) =
     BApp app -> inferApp scope app
     BRecExtend ext -> inferRecExtend scope ext
     BGetField ext -> inferGetField scope ext
+    BInject ext -> inferInject scope ext
 
 inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
 inferScheme scope x = runInfer $ infer scope x >>= generalize
@@ -881,6 +901,14 @@ example7 :: V
 example7 =
     lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
 
+example8 :: V
+example8 =
+    lambda "g" $ \g ->
+    lambda "f" $ \f ->
+    lambda "x" $ \x ->
+    g $$ (f $$ "Just" .$ x)
+      $$ (f $$ "Nothing" .$ recVal [])
+
 runTests :: IO ()
 runTests =
     mapM_ test
@@ -891,4 +919,5 @@ runTests =
     , example5
     , example6
     , example7
+    , example8
     ]
