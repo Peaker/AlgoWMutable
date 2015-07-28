@@ -41,11 +41,9 @@ module Type
     , runTests
     ) where
 
-import           Data.STRef
 import           Prelude.Compat hiding (abs)
 
 import           Control.DeepSeq (NFData(..))
-import           Data.Type.Equality
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
@@ -56,15 +54,16 @@ import           Data.Foldable (sequenceA_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
+import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.String (IsString(..))
+import           Data.Type.Equality
+import qualified Data.UnionFind.ST as UF
 import           GHC.Generics (Generic)
 import           MapPretty ()
 import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
-import           UF (UF)
-import qualified UF as UF
 import           WriterT
 
 data ASTTag = TypeT | RecordT
@@ -380,7 +379,7 @@ data TypeASTPosition s tag = TypeASTPosition
 
 type UFType s = UFTypeAST s 'TypeT
 type UFRecord s = UFTypeAST s 'RecordT
-newtype UFTypeAST s tag = TS { tsUF :: UF s (TypeASTPosition s tag) }
+newtype UFTypeAST s tag = TS { tsUF :: UF.Point s (TypeASTPosition s tag) }
 instance Pretty (UFTypeAST s tag) where
     pPrint _ = ".."
 
@@ -465,7 +464,7 @@ newPosition t =
     do
         tvarName <- freshTVarName
         TypeASTPosition (Set.singleton tvarName) t
-            & liftST . UF.new <&> TS
+            & liftST . UF.fresh <&> TS
 
 {-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (UFTypeAST s tag)
@@ -491,7 +490,7 @@ instantiate (Scheme (SchemeBinders typeVars recordVars) typ) =
         go typ
 
 getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
-getWrapper (TS r) = UF.find r & liftST
+getWrapper (TS r) = UF.descriptor r & liftST
 
 deref ::
     forall s tag. IsTag tag =>
@@ -642,7 +641,20 @@ constraintsCheck old@(RecordConstraints names) r =
 
 setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
-    UF.modify (tsUF u) (tastPosType . Lens._Left <>~ constraints) & liftST & void
+    UF.modifyDescriptor (tsUF u) (tastPosType . Lens._Left <>~ constraints) & liftST & void
+
+
+{-# INLINE union #-}
+union :: UF.Point s a -> UF.Point s a -> (a -> a -> (a, b)) -> ST s (Maybe b)
+union x y f =
+    do
+        ref <- newSTRef $ Nothing
+        UF.union' x y $ \a b ->
+            do
+                let (desc, result) = f a b
+                writeSTRef ref $ Just result
+                return desc
+        readSTRef ref
 
 unify ::
     (IsTag tag, Monoid (Constraints tag)) =>
@@ -650,7 +662,7 @@ unify ::
      TypeAST tag (UFTypeAST s) -> Infer s ()) ->
     UFTypeAST s tag -> UFTypeAST s tag -> Infer s ()
 unify f u v =
-    UF.union g (tsUF u) (tsUF v)
+    union (tsUF u) (tsUF v) g
     & liftST
     >>= maybe (return ()) id
     where
