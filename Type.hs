@@ -23,6 +23,7 @@ module Type
     , Scope, newScope, emptyScope
 
     , ASTTag(..)
+    , Type, Record
     , TypeAST(..), bitraverse, typeSubexprs
     , SchemeBinders(..)
     , Scheme(..)

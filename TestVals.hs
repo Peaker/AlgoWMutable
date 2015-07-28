@@ -23,7 +23,7 @@ import qualified Data.Map as Map
 import           Data.String (IsString(..))
 import           Type
 
-type Type = T 'TypeT
+type TType = T 'TypeT
 
 -- TODO: $$ to be type-classed for TApp vs BApp
 -- TODO: TCon "->" instead of TFun
@@ -36,7 +36,7 @@ eLet name val mkBody = lam name body $$ val
 whereItem :: String -> V -> (V -> V) -> V
 whereItem name val mkBody = lambda name mkBody $$ val
 
--- openRecordType :: String -> [(String, Type)] -> Type
+-- openRecordType :: String -> [(String, TType)] -> TType
 -- openRecordType tv = TRecord . foldr (uncurry RecExtend) (CVar tv)
 
 -- listTypePair :: (Id, Nominal)
@@ -56,10 +56,10 @@ whereItem name val mkBody = lambda name mkBody $$ val
 --         tvName = "a"
 --         tv = TVar tvName
 
--- listOf :: Type -> Type
+-- listOf :: TType -> TType
 -- listOf = TInst (fst listTypePair) . Map.singleton "elem"
 
--- boolType :: Type
+-- boolType :: TType
 -- boolType = TInst (fst boolTypePair) Map.empty
 
 -- boolTypePair :: (Id, Nominal)
@@ -159,14 +159,14 @@ whereItem name val mkBody = lambda name mkBody $$ val
 
 --     )
 
--- maybeOf :: Type -> Type
+-- maybeOf :: TType -> TType
 -- maybeOf t =
 --     TSum $
 --     CExtend "Nothing" (recordType []) $
 --     CExtend "Just" t $
 --     CEmpty
 
-infixType :: Type -> Type -> Type -> Type
+infixType :: TType -> TType -> TType -> TType
 infixType a b c = recordType [("l", a), ("r", b)] ~> c
 
 infixArgs :: V -> V -> V
