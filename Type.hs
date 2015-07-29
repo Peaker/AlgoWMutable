@@ -405,8 +405,10 @@ instance Pretty Err where
         "Duplicate fields in record:" <+>
         (intercalate ", " . map text) names
 
+newtype Env s = Env { envFresh :: STRef s Int }
+
 newtype Infer s a = Infer
-    { unInfer :: STRef s Int -> ST s (Either Err a) }
+    { unInfer :: Env s -> ST s (Either Err a) }
     deriving (Functor)
 instance Applicative (Infer s) where
     {-# INLINE pure #-}
@@ -428,7 +430,7 @@ instance Monad (Infer s) where
         Right x -> unInfer (f x) s
 
 runInfer :: (forall s. Infer s a) -> Either Err a
-runInfer act = runST $ newSTRef 0 >>= unInfer act
+runInfer act = runST $ newSTRef 0 <&> Env >>= unInfer act
 
 {-# INLINE liftST #-}
 liftST :: ST s a -> Infer s a
@@ -439,11 +441,11 @@ throwError err = Infer $ \_ -> return $ Left err
 
 modify' :: (Int -> Int) -> Infer s Int
 modify' f =
-    Infer $ \s ->
+    Infer $ \env ->
     do
-        old <- readSTRef s
+        old <- envFresh env & readSTRef
         let new = f old
-        writeSTRef s $! new
+        writeSTRef (envFresh env) $! new
         return (Right new)
 
 data Constraints tag where
