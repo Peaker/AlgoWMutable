@@ -1,5 +1,6 @@
 *.dyn_hi
 *.dyn_o
+*.i_o
 *.hi
 *.o
 benchmark
