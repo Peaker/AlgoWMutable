@@ -56,8 +56,8 @@ whereItem name val mkBody = lambda name mkBody $$ val
 --         tvName = "a"
 --         tv = TVar tvName
 
--- listOf :: TType -> TType
--- listOf = TInst (fst listTypePair) . Map.singleton "elem"
+listOf :: TType -> TType
+listOf = tInst "List" . Map.singleton "elem"
 
 -- boolType :: TType
 -- boolType = TInst (fst boolTypePair) Map.empty
@@ -196,13 +196,13 @@ env = newScope $
         , ("//",     forAll 0 0 0 $ \ []  [] [] -> infixType intType intType intType)
         -- , ("sum",    forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
         -- , ("filter", forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
-        -- , (":",      forAll 1 0 0 $ \ [a] [] [] -> recordType [("head", a), ("tail", listOf a)] ~> listOf a)
-        -- , ("[]",     forAll 1 0 0 $ \ [a] [] [] -> listOf a)
-        -- , ("concat", forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
-        -- , ("map",    forAll ["a", "b"] $ \ [a, b] [] [] -> recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
+        , (":",      forAll 1 0 0 $ \ [a] [] [] -> recordType [("head", a), ("tail", listOf a)] ~> listOf a)
+        , ("[]",     forAll 1 0 0 $ \ [a] [] [] -> listOf a)
+        , ("concat", forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
+        , ("map",    forAll 2 0 0 $ \ [a, b] [] [] -> recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
         -- , ("..",     forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
         , ("||",     forAll 0 0 0 $ \ [] [] [] -> infixType boolType boolType boolType)
-        -- , ("head",   forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+        , ("head",   forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
         , ("negate", forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
         , ("sqrt",   forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
         , ("id",     forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
@@ -227,14 +227,11 @@ env = newScope $
     --     ]
     -- }
 
--- list :: [V] -> V
--- list [] = toNom "List" $ inject "[]" recEmpty
--- list items@(_x:_) =
---     foldr cons (list []) items
+list :: [V] -> V
+list = foldr cons (global "[]")
 
--- cons :: V -> V -> V
--- cons h t =
---     toNom "List" $ inject ":" $ record [("head", h), ("tail", t)]
+cons :: V -> V -> V
+cons h t = global ":" $$: [("head", h), ("tail", t)]
 
 factorialVal :: V
 factorialVal =
@@ -281,59 +278,59 @@ euler1Val =
         ]
     )
 
--- solveDepressedQuarticVal :: V
--- solveDepressedQuarticVal =
---     lambdaRecord ["e", "d", "c"] $ \[e, d, c] ->
---     whereItem "solvePoly" (global "id")
---     $ \solvePoly ->
---     whereItem "sqrts"
---     ( lambda "x" $ \x ->
---         whereItem "r"
---         ( global "sqrt" $$ x
---         ) $ \r ->
---         list [r, global "negate" $$ r]
---     )
---     $ \sqrts ->
---     global "if" $$:
---     [ ("condition", global "==" $$ infixArgs d (litInt 0))
---     , ( "then",
---             global "concat" $$
---             ( global "map" $$:
---                 [ ("list", solvePoly $$ list [e, c, litInt 1])
---                 , ("mapping", sqrts)
---                 ]
---             )
---         )
---     , ( "else",
---             global "concat" $$
---             ( global "map" $$:
---                 [ ( "list", sqrts $$ (global "head" $$ (solvePoly $$ list
---                         [ global "negate" $$ (d %* d)
---                         , (c %* c) %- (litInt 4 %* e)
---                         , litInt 2 %* c
---                         , litInt 1
---                         ]))
---                     )
---                 , ( "mapping",
---                         lambda "x" $ \x ->
---                         solvePoly $$ list
---                         [ (c %+ (x %* x)) %- (d %/ x)
---                         , litInt 2 %* x
---                         , litInt 2
---                         ]
---                     )
---                 ]
---             )
---         )
---     ]
---     where
---         (%+) = inf "+"
---         (%-) = inf "-"
---         (%*) = inf "*"
---         (%/) = inf "/"
+solveDepressedQuarticVal :: V
+solveDepressedQuarticVal =
+    lambdaRecord "params" ["e", "d", "c"] $ \[e, d, c] ->
+    whereItem "solvePoly" (global "id")
+    $ \solvePoly ->
+    whereItem "sqrts"
+    ( lambda "x" $ \x ->
+        whereItem "r"
+        ( global "sqrt" $$ x
+        ) $ \r ->
+        list [r, global "negate" $$ r]
+    )
+    $ \sqrts ->
+    global "if" $$:
+    [ ("condition", global "==" $$ infixArgs d (litInt 0))
+    , ( "then",
+            global "concat" $$
+            ( global "map" $$:
+                [ ("list", solvePoly $$ list [e, c, litInt 1])
+                , ("mapping", sqrts)
+                ]
+            )
+        )
+    , ( "else",
+            global "concat" $$
+            ( global "map" $$:
+                [ ( "list", sqrts $$ (global "head" $$ (solvePoly $$ list
+                        [ global "negate" $$ (d %* d)
+                        , (c %* c) %- (litInt 4 %* e)
+                        , litInt 2 %* c
+                        , litInt 1
+                        ]))
+                    )
+                , ( "mapping",
+                        lambda "x" $ \x ->
+                        solvePoly $$ list
+                        [ (c %+ (x %* x)) %- (d %/ x)
+                        , litInt 2 %* x
+                        , litInt 2
+                        ]
+                    )
+                ]
+            )
+        )
+    ]
+    where
+        (%+) = inf "+"
+        (%-) = inf "-"
+        (%*) = inf "*"
+        (%/) = inf "/"
 
--- inf :: V.GlobalId -> V -> V -> V
--- inf str x y = global str $$ infixArgs x y
+inf :: String -> V -> V -> V
+inf str x y = global str $$ infixArgs x y
 
 -- factorsVal :: V
 -- factorsVal =

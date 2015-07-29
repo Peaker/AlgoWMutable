@@ -27,7 +27,7 @@ benches =
     [ ("factorial", benchInfer factorialVal)
     , ("factorialNoRecords", benchInfer factorialValNoRecords)
     -- , ("euler1", benchInfer euler1Val)
-    -- , ("solveDepressedQuartic", benchInfer solveDepressedQuarticVal)
+    , ("solveDepressedQuartic", benchInfer solveDepressedQuarticVal)
     -- , ("factors", benchInfer factorsVal)
     ]
 
