@@ -52,7 +52,7 @@ import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
-import           Control.Monad (unless, void)
+import           Control.Monad (unless, void, zipWithM_)
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
 import           Data.Foldable (sequenceA_)
@@ -105,7 +105,7 @@ newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
 
 data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
-    TInst :: String -> TypeAST 'TypeT ast
+    TInst :: String -> !(Map String (ast 'TypeT)) -> TypeAST 'TypeT ast
     TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
     TSum :: !(ast SumT) -> Type ast
     TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
@@ -121,12 +121,13 @@ type Composite c = TypeAST ('CompositeT c)
 instance (NFData (ast 'TypeT), NFData (ast RecordT), NFData (ast SumT), NFData (ast tag)) =>
          NFData (TypeAST tag ast) where
     rnf (TFun x y) = rnf x `seq` rnf y
-    rnf (TInst n) = rnf n
+    rnf (TInst n params) = rnf n `seq` rnf params
     rnf (TRecord record) = rnf record
     rnf (TSum s) = rnf s
     rnf TEmptyComposite = ()
     rnf (TCompositeExtend n t r) = rnf n `seq` rnf t `seq` rnf r
 
+{-# INLINE bitraverse #-}
 bitraverse ::
     Applicative f =>
     (ast 'TypeT -> f (ast' 'TypeT)) ->
@@ -135,7 +136,7 @@ bitraverse ::
     TypeAST tag ast -> f (TypeAST tag ast')
 bitraverse typ reco su = \case
     TFun a b -> TFun <$> typ a <*> typ b
-    TInst n -> pure (TInst n)
+    TInst n params -> TInst n <$> traverse typ params
     TRecord r -> TRecord <$> reco r
     TSum s -> TSum <$> su s
     TEmptyComposite -> pure TEmptyComposite
@@ -145,6 +146,7 @@ bitraverse typ reco su = \case
         IsRecordC Refl -> reco r
         IsSumC Refl -> su r
 
+{-# INLINE typeSubexprs #-}
 typeSubexprs ::
     forall f t ast ast'. (Applicative f, IsTag t) =>
     (forall tag. IsTag tag => ast tag -> f (ast' tag)) ->
@@ -156,9 +158,9 @@ _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
     _ -> Nothing
 
-_TInst :: Lens.Prism' (Type a) String
-_TInst = Lens.prism' TInst $ \case
-    TInst n -> Just n
+_TInst :: Lens.Prism' (Type ast) (String, Map String (ast 'TypeT))
+_TInst = Lens.prism' (uncurry TInst) $ \case
+    TInst n p -> Just (n, p)
     _ -> Nothing
 
 _TRecord :: Lens.Prism' (Type ast) (ast RecordT)
@@ -187,7 +189,7 @@ instance (Pretty (ast 'TypeT), Pretty (ast RecordT), Pretty (ast SumT)) => Prett
         TFun a b ->
             maybeParens (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
-        TInst name -> "#" <> text name
+        TInst name params -> "#" <> text name <+> pPrint params
         TRecord r -> pPrintPrec level prec r
         TSum s -> pPrintPrec level prec s
 
@@ -308,14 +310,14 @@ compositeFrom ((name, typ):fs) = T $ TCompositeExtend name typ $ compositeFrom f
 recordType :: [(String, T 'TypeT)] -> T 'TypeT
 recordType = T . TRecord . compositeFrom
 
-tInst :: String -> T 'TypeT
-tInst = T . TInst
+tInst :: String -> Map String (T 'TypeT) -> T 'TypeT
+tInst name params = T $ TInst name params
 
 intType :: T 'TypeT
-intType = tInst "Int"
+intType = tInst "Int" Map.empty
 
 boolType :: T 'TypeT
-boolType = T $ TInst "Bool"
+boolType = tInst "Bool" Map.empty
 
 lam :: String -> V -> V
 lam name body = V $ BLam $ Abs name body
@@ -621,12 +623,6 @@ unifyMatch expected vTyp prism =
     Nothing -> throwError $ DoesNotUnify expected (pPrint vTyp)
     Just vcontent -> return vcontent
 
-unifyMatchEq :: (Pretty v, Pretty a, Eq a) => Doc -> v -> a -> Lens.Getting (Monoid.First a) v a -> Infer s ()
-unifyMatchEq expected vTyp u prism =
-    do
-        v <- unifyMatch expected vTyp prism
-        unless (u == v) $ throwError $ DoesNotUnify (pPrint u) (pPrint vTyp)
-
 type CompositeTail c s = UFComposite c s
 type CompositeFields s = Map String (UFType s)
 type ClosedComposite s = CompositeFields s
@@ -771,12 +767,29 @@ unify f u v =
             (Right x, Right y) -> (Right x, f x y)
             & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
+unifyTInstParams ::
+    Err -> Map String (UFType s) -> Map String (UFType s) -> Infer s ()
+unifyTInstParams err uParams vParams
+    | uSize /= vSize = throwError err
+    | uSize == 0 = return ()
+    | otherwise =
+        zipWithM_ unifyParam (Map.toAscList uParams) (Map.toAscList vParams)
+    where
+        uSize = Map.size uParams
+        vSize = Map.size vParams
+        unifyParam (_, uParam) (_, vParam) = unifyType uParam vParam
+
 unifyType :: UFType s -> UFType s -> Infer s ()
 unifyType =
     unify f
     where
-        f (TInst uName) vTyp =
-            unifyMatchEq "TInst" vTyp uName _TInst
+        f uTyp@(TInst uName uParams) vTyp =
+            case vTyp of
+            TInst vName vParams | uName == vName ->
+                unifyTInstParams err uParams vParams
+            _ -> throwError err
+            where
+                err = DoesNotUnify (pPrint uTyp) (pPrint vTyp)
         f (TRecord uRec) vTyp =
             do
                 vRec <- unifyMatch "TRecord" vTyp _TRecord
@@ -791,6 +804,9 @@ unifyType =
                 unifyType uArg vArg
                 unifyType uRes vRes
 
+int :: TypeAST 'TypeT ast
+int = TInst "Int" Map.empty
+
 inferLeaf :: Scope s -> Leaf -> Infer s (UFType s)
 inferLeaf scope leaf =
     case leaf of
@@ -804,7 +820,7 @@ inferLeaf scope leaf =
         case lookupGlobal n scope of
         Just scheme -> instantiate scheme
         Nothing -> throwError $ VarNotInScope n
-    LInt _ -> wrap (TInst "Int")
+    LInt _ -> int & wrap
     LHole -> freshTVar TypeConstraints
     LVar n ->
         case lookupLocal n scope of
