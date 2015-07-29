@@ -37,6 +37,7 @@ module Type
     , lam, lambda, lambdaRecord
     , absurd, case_, cases
     , recVal, global, litInt
+    , hole
     , ($$), ($=), ($.), ($+), ($-), ($$:)
 
     , forAll
@@ -206,6 +207,7 @@ data Leaf
     | LEmptyRecord
     | LAbsurd
     | LInt Int
+    | LHole
     deriving (Show)
 
 instance Pretty Leaf where
@@ -214,6 +216,7 @@ instance Pretty Leaf where
     pPrint LEmptyRecord = "{}"
     pPrint LAbsurd = "Absurd"
     pPrint (LInt x) = pPrint x
+    pPrint LHole = "?"
 
 data Abs v = Abs String !v
     deriving (Show, Functor, Foldable, Traversable)
@@ -334,6 +337,9 @@ cases = foldr (uncurry case_) absurd
 
 litInt :: Int -> V
 litInt = V . BLeaf . LInt
+
+hole :: V
+hole = V $ BLeaf LHole
 
 infixl 4 $$
 ($$) :: V -> V -> V
@@ -791,7 +797,7 @@ inferLeaf scope leaf =
     LEmptyRecord -> wrap TEmptyComposite >>= wrap . TRecord
     LAbsurd ->
         do
-            res <- freshTVar mempty
+            res <- freshTVar TypeConstraints
             emptySum <- wrap TEmptyComposite >>= wrap . TSum
             TFun emptySum res & wrap
     LGlobal n ->
@@ -799,6 +805,7 @@ inferLeaf scope leaf =
         Just scheme -> instantiate scheme
         Nothing -> throwError $ VarNotInScope n
     LInt _ -> wrap (TInst "Int")
+    LHole -> freshTVar TypeConstraints
     LVar n ->
         case lookupLocal n scope of
         Just typ -> return typ
