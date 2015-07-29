@@ -42,11 +42,11 @@ module Type
 
     , forAll
     , test
-    , example1, example2, example3, example4, example5, example6, example7, example8, example9
+    , example1, example2, example3, example4, example5, example6, example7, example8, example9, example10
     , runTests
     ) where
 
-import           Prelude.Compat hiding (abs)
+import           Prelude.Compat hiding (abs, tail)
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
@@ -257,8 +257,8 @@ instance Pretty v => Pretty (Val v) where
         pPrintPrec level 9 func <+> pPrintPrec level 10 arg
     pPrintPrec level prec (BRecExtend (RecExtend name val rest)) =
         maybeParens (prec > 7) $
-        text name <> "="
-        <> pPrintPrec level 8 val <+> "*"
+        "{" <> text name <> "="
+        <> pPrintPrec level 8 val <+> "} *"
         <+> pPrintPrec level 7 rest
     pPrintPrec level prec (BCase (Case name handler restHandler)) =
         maybeParens (prec > 7) $
@@ -623,39 +623,37 @@ unifyMatch expected vTyp prism =
     Nothing -> throwError $ DoesNotUnify expected (pPrint vTyp)
     Just vcontent -> return vcontent
 
-type CompositeTail c s = UFComposite c s
+data CompositeTailType = CompositeTailOpen | CompositeTailClosed
 type CompositeFields s = Map String (UFType s)
-type ClosedComposite s = CompositeFields s
-type OpenComposite c s = (CompositeFields s, CompositeTail c s)
 
 data FlatComposite c s = FlatComposite
-    { __frMTail :: Maybe (CompositeTail c s)
-    , _frFields :: CompositeFields s
+    { __fcTailUF :: UFComposite c s
+    , _fcFields :: CompositeFields s
+    , __fcTailType :: CompositeTailType
     }
 
 Lens.makeLenses ''FlatComposite
 
-flattenVal :: Composite c (UFTypeAST s) -> Infer s (FlatComposite c s)
-flattenVal TEmptyComposite = return $ FlatComposite Nothing Map.empty
-flattenVal (TCompositeExtend n t r) =
-    flatten r <&> frFields . Lens.at n ?~ t
+flattenVal :: UFComposite c s -> Composite c (UFTypeAST s) -> Infer s (FlatComposite c s)
+flattenVal uf TEmptyComposite = return $ FlatComposite uf Map.empty CompositeTailClosed
+flattenVal _ (TCompositeExtend n t r) =
+    flatten r <&> fcFields . Lens.at n ?~ t
     where
         flatten ts =
             getWrapper ts <&> _tastPosType >>= \case
-            Left _ -> return $ FlatComposite (Just ts) Map.empty
-            Right typ -> flattenVal typ
+            Left _ -> return $ FlatComposite ts Map.empty CompositeTailOpen
+            Right typ -> flattenVal ts typ
 
-unflatten :: IsCompositeTag c => FlatComposite c s -> Infer s (UFComposite c s)
-unflatten (FlatComposite mTail fields) =
+unflatten ::
+    IsCompositeTag c => UFComposite c s -> CompositeFields s -> Infer s (UFComposite c s)
+unflatten tail fields =
     Map.toList fields & go
     where
-        go [] =
-            case mTail of
-            Nothing -> wrap TEmptyComposite
-            Just tailVal -> return tailVal
+        go [] = return tail
         go ((name, typ):fs) = go fs <&> TCompositeExtend name typ >>= wrap
 
-unifyClosedComposites :: ClosedComposite s -> ClosedComposite s -> Infer s ()
+{-# INLINE unifyClosedComposites #-}
+unifyClosedComposites :: CompositeFields s -> CompositeFields s -> Infer s ()
 unifyClosedComposites uFields vFields
     | Map.keysSet uFields == Map.keysSet vFields = return ()
     | otherwise =
@@ -664,11 +662,15 @@ unifyClosedComposites uFields vFields
           ("Record fields:" <+> pPrint (Map.keys uFields))
           ("Record fields:" <+> pPrint (Map.keys vFields))
 
-unifyOpenComposite :: IsCompositeTag c => OpenComposite c s -> ClosedComposite s -> Infer s ()
-unifyOpenComposite (uFields, uTail) vFields
+{-# INLINE unifyOpenComposite #-}
+unifyOpenComposite ::
+    IsCompositeTag c =>
+    (CompositeFields s, UFComposite c s) ->
+    (CompositeFields s, UFComposite c s) -> Infer s ()
+unifyOpenComposite (uFields, uTail) (vFields, vTail)
     | Map.null uniqueUFields =
           do
-              tailVal <- unflatten $ FlatComposite Nothing uniqueVFields
+              tailVal <- unflatten vTail uniqueVFields
               unify (\_ _ -> return ()) uTail tailVal
     | otherwise =
           throwError $
@@ -680,15 +682,19 @@ unifyOpenComposite (uFields, uTail) vFields
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
-unifyOpenComposites :: IsCompositeTag c => OpenComposite c s -> OpenComposite c s -> Infer s ()
+{-# INLINE unifyOpenComposites #-}
+unifyOpenComposites ::
+    IsCompositeTag c =>
+    (CompositeFields s, UFComposite c s) ->
+    (CompositeFields s, UFComposite c s) -> Infer s ()
 unifyOpenComposites (uFields, uTail) (vFields, vTail) =
     do
         commonRest <-
             freshTVar $ CompositeConstraints $
             Map.keysSet uFields `Set.union`
             Map.keysSet vFields
-        uRest <- FlatComposite (Just commonRest) uniqueVFields & unflatten
-        vRest <- FlatComposite (Just commonRest) uniqueUFields & unflatten
+        uRest <- unflatten commonRest uniqueVFields
+        vRest <- unflatten commonRest uniqueUFields
         unifyComposite uTail uRest
         unifyComposite vTail vRest
     where
@@ -696,8 +702,8 @@ unifyOpenComposites (uFields, uTail) (vFields, vTail) =
         uniqueVFields = vFields `Map.difference` uFields
 
 unifyComposite :: IsCompositeTag c => UFComposite c s -> UFComposite c s -> Infer s ()
-unifyComposite =
-    unify f
+unifyComposite uUf vUf =
+    unify f uUf vUf
     where
         -- We already know we are record vals, and will re-read them
         -- via flatten, so no need for unify's read of these:
@@ -709,28 +715,28 @@ unifyComposite =
                 unifyComposite ur vr
         f u v =
             do
-                FlatComposite uMTail uFields <- flattenVal u
-                FlatComposite vMTail vFields <- flattenVal v
+                FlatComposite uTail uFields uType <- flattenVal uUf u
+                FlatComposite vTail vFields vType <- flattenVal vUf v
                 Map.intersectionWith unifyType uFields vFields
                     & sequenceA_
-                case (uMTail, vMTail) of
-                    (Nothing, Nothing) -> unifyClosedComposites uFields vFields
-                    (Just uTail, Nothing) -> unifyOpenComposite (uFields, uTail) vFields
-                    (Nothing, Just vTail) -> unifyOpenComposite (vFields, vTail) uFields
-                    (Just uTail, Just vTail) -> unifyOpenComposites (uFields, uTail) (vFields, vTail)
+                case (uType, vType) of
+                    (CompositeTailClosed, CompositeTailClosed) -> unifyClosedComposites uFields vFields
+                    (CompositeTailOpen  , CompositeTailClosed) -> unifyOpenComposite (uFields, uTail) (vFields, vTail)
+                    (CompositeTailClosed, CompositeTailOpen  ) -> unifyOpenComposite (vFields, vTail) (uFields, uTail)
+                    (CompositeTailOpen  , CompositeTailOpen  ) -> unifyOpenComposites (uFields, uTail) (vFields, vTail)
 
-constraintsCheck :: Constraints tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
-constraintsCheck TypeConstraints _ = return ()
-constraintsCheck old@(CompositeConstraints names) r =
+constraintsCheck :: UFTypeAST s tag -> Constraints tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
+constraintsCheck _ TypeConstraints _ = return ()
+constraintsCheck uf old@(CompositeConstraints names) r =
     do
-        FlatComposite mTail fields <- flattenVal r
+        FlatComposite tail fields tailType <- flattenVal uf r
         let fieldsSet = Map.keysSet fields
         let forbidden = Set.intersection fieldsSet names
         unless (Set.null forbidden) $ throwError $ DuplicateFields $
             Set.toList forbidden
-        case mTail of
-            Nothing -> return ()
-            Just rTail -> setConstraints rTail (old `mappend` CompositeConstraints fieldsSet)
+        case tailType of
+            CompositeTailClosed -> return ()
+            CompositeTailOpen -> setConstraints tail (old `mappend` CompositeConstraints fieldsSet)
 
 setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
@@ -762,8 +768,8 @@ unify f u v =
         g (TypeASTPosition uNames uMTyp) (TypeASTPosition vNames vMTyp) =
             case (uMTyp, vMTyp) of
             (Left uCs, Left vCs) -> (Left (uCs `mappend` vCs), return ())
-            (Left uCs, Right y) -> (Right y, constraintsCheck uCs y)
-            (Right x, Left vCs) -> (Right x, constraintsCheck vCs x)
+            (Left uCs, Right y) -> (Right y, constraintsCheck v uCs y)
+            (Right x, Left vCs) -> (Right x, constraintsCheck u vCs x)
             (Right x, Right y) -> (Right x, f x y)
             & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
@@ -988,6 +994,14 @@ example9 =
     , ("Just", lambda "x" $ \x -> litInt 1 $+ x)
     ]
 
+example10 :: V
+example10 =
+    lambda "f" $ \f ->
+    lambda "x" $ \x ->
+    (x $. "a")
+    $$ (f $$ x)
+    $$ (f $$ recVal [("a", hole)])
+
 runTests :: IO ()
 runTests =
     mapM_ test
@@ -1000,4 +1014,5 @@ runTests =
     , example7
     , example8
     , example9
+    , example10
     ]
