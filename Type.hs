@@ -56,8 +56,6 @@ import           Control.Lens.Tuple
 import           Control.Monad (unless, void, zipWithM_)
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
-import           Data.Text (Text)
-import qualified Data.Text as Text
 import           Data.Foldable (sequenceA_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -66,10 +64,14 @@ import           Data.Proxy (Proxy(..))
 import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
+import           Data.Text (Text)
+import qualified Data.Text as Text
 import           Data.Type.Equality ((:~:)(..))
-import qualified Data.UnionFind.ST as UF
+import qualified Data.UnionFind.ZoneRef as UF
 import           GHC.Generics (Generic)
 import qualified MapPretty as MapPretty
+import           RefZone (Zone)
+import qualified RefZone as RefZone
 import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, ($+$), (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           WriterT
@@ -409,7 +411,10 @@ instance Pretty Err where
         "Duplicate fields in record:" <+>
         (intercalate ", " . map bs) names
 
-newtype Env s = Env { envFresh :: STRef s Int }
+data Env s = Env
+    { envFresh :: STRef s Int
+    , envZone :: Zone s
+    }
 
 newtype Infer s a = Infer
     { unInfer :: Env s -> ST s (Either Err a) }
@@ -434,7 +439,16 @@ instance Monad (Infer s) where
         Right x -> unInfer (f x) s
 
 runInfer :: (forall s. Infer s a) -> Either Err a
-runInfer act = runST $ newSTRef 0 <&> Env >>= unInfer act
+runInfer act =
+    runST $
+    do
+        fresh <- newSTRef 0
+        zone <- RefZone.new
+        unInfer act $ Env { envFresh = fresh, envZone = zone }
+
+{-# INLINE getEnv #-}
+getEnv :: Infer s (Env s)
+getEnv = Infer $ \env -> return $ Right env
 
 {-# INLINE liftST #-}
 liftST :: ST s a -> Infer s a
@@ -443,14 +457,15 @@ liftST act = Infer $ \_ -> act <&> Right
 throwError :: Err -> Infer s a
 throwError err = Infer $ \_ -> return $ Left err
 
-modify' :: (Int -> Int) -> Infer s Int
-modify' f =
-    Infer $ \env ->
+nextFresh :: Infer s Int
+nextFresh =
+    getEnv <&> envFresh >>= \ref ->
     do
-        old <- envFresh env & readSTRef
-        let new = f old
-        writeSTRef (envFresh env) $! new
-        return (Right new)
+        old <- readSTRef ref
+        let !new = 1 + old
+        writeSTRef ref $! new
+        return new
+    & liftST
 
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
@@ -555,7 +570,7 @@ insertLocal name typ (Scope locals globals) =
 
 {-# INLINE freshTVarName #-}
 freshTVarName :: Infer s (TVarName tag)
-freshTVarName = modify' (+1) <&> TVarName
+freshTVarName = nextFresh <&> TVarName
 
 {-# INLINE newPosition #-}
 newPosition ::
@@ -564,8 +579,9 @@ newPosition ::
 newPosition t =
     do
         tvarName <- freshTVarName
+        zone <- getEnv <&> envZone
         TypeASTPosition (Set.singleton tvarName) t
-            & liftST . UF.fresh <&> TS
+            & liftST . UF.fresh zone <&> TS
 
 {-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (UFTypeAST s tag)
@@ -593,7 +609,10 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
         go typ
 
 getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
-getWrapper (TS r) = UF.descriptor r & liftST
+getWrapper (TS r) =
+    do
+        zone <- getEnv <&> envZone
+        UF.descriptor zone r & liftST
 
 deref ::
     forall s tag. IsTag tag =>
@@ -750,15 +769,18 @@ constraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) innerUF
 
 setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
-    UF.modifyDescriptor (tsUF u) (tastPosType . Lens._Left <>~ constraints) & liftST & void
+    do
+        zone <- getEnv <&> envZone
+        UF.modifyDescriptor zone (tsUF u) (tastPosType . Lens._Left <>~ constraints)
+            & liftST & void
 
 
 {-# INLINE union #-}
-union :: UF.Point s a -> UF.Point s a -> (a -> a -> (a, b)) -> ST s (Maybe b)
-union x y f =
+union :: Zone s -> UF.Point s a -> UF.Point s a -> (a -> a -> (a, b)) -> ST s (Maybe b)
+union zone x y f =
     do
         ref <- newSTRef $ Nothing
-        UF.union' x y $ \a b ->
+        UF.union' zone x y $ \a b ->
             do
                 let (desc, result) = f a b
                 writeSTRef ref $ Just result
@@ -771,9 +793,11 @@ unify ::
      TypeAST tag (UFTypeAST s) -> Infer s ()) ->
     UFTypeAST s tag -> UFTypeAST s tag -> Infer s ()
 unify f u v =
-    union (tsUF u) (tsUF v) g
-    & liftST
-    >>= maybe (return ()) id
+    do
+        zone <- getEnv <&> envZone
+        union zone (tsUF u) (tsUF v) g
+            & liftST
+            >>= maybe (return ()) id
     where
         g (TypeASTPosition uNames uMTyp) (TypeASTPosition vNames vMTyp) =
             case (uMTyp, vMTyp) of
