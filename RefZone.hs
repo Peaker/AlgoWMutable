@@ -1,7 +1,7 @@
 {-# LANGUAGE RankNTypes, NoImplicitPrelude #-}
 module RefZone
     ( Zone, new, freeze, clone
-    , Ref, newRef, readRef, writeRef
+    , Ref, newRef, readRef, writeRef, modifyRef
     ) where
 
 import           Control.Lens.Operators
@@ -28,6 +28,9 @@ data Zone s = Zone
 
 newtype Frozen = Frozen (V.Vector Box)
 
+newtype Ref a = Ref Int
+    deriving (Eq)
+
 new :: ST s (Zone s)
 new = Zone <$> newSTRef 0 <*> (MV.new 1 >>= newSTRef)
 
@@ -44,8 +47,6 @@ clone (Frozen vector) =
     Zone
     <$> newSTRef (V.length vector)
     <*> (V.thaw vector >>= newSTRef)
-
-newtype Ref a = Ref Int
 
 {-# INLINE incSize #-}
 incSize :: Zone s -> ST s (MV.STVector s Box, Int)
@@ -90,3 +91,14 @@ writeRef zone (Ref i) val =
     do
         mvector <- readSTRef (zoneVectorRef zone)
         toBox val & MV.write mvector i
+
+{-# INLINE modifyRef #-}
+modifyRef :: Zone s -> Ref a -> (a -> a) -> ST s ()
+modifyRef zone (Ref i) f =
+    do
+        mvector <- readSTRef (zoneVectorRef zone)
+        MV.read mvector i
+            <&> unsafeFromBox
+            <&> f
+            <&> toBox
+            >>= MV.write mvector i
