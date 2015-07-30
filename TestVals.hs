@@ -1,5 +1,4 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NoImplicitPrelude, DataKinds, OverloadedStrings #-}
 
 module TestVals
     -- ( env

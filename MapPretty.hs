@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
 {-# OPTIONS -fno-warn-orphans #-}
 module MapPretty (pPrintWith) where
 

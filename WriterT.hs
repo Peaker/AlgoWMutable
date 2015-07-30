@@ -1,5 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE NoImplicitPrelude, GeneralizedNewtypeDeriving, BangPatterns #-}
 module WriterT
     ( WriterT
     , runWriterT
