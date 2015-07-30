@@ -37,7 +37,7 @@ module Type
     , intType, boolType
     , lam, lambda, lambdaRecord
     , absurd, case_, cases
-    , recVal, global, litInt
+    , recVal, global, var, litInt
     , hole
     , ($$), ($=), ($.), ($+), ($-), ($$:)
 
@@ -56,6 +56,8 @@ import           Control.Lens.Tuple
 import           Control.Monad (unless, void, zipWithM_)
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
+import           Data.Text (Text)
+import qualified Data.Text as Text
 import           Data.Foldable (sequenceA_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -64,14 +66,16 @@ import           Data.Proxy (Proxy(..))
 import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
-import           Data.String (IsString(..))
 import           Data.Type.Equality
 import qualified Data.UnionFind.ST as UF
 import           GHC.Generics (Generic)
-import           MapPretty ()
+import qualified MapPretty as MapPretty
 import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, ($+$), (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           WriterT
+
+bs :: Text -> Doc
+bs = text . Text.unpack
 
 data CompositeTag = RecordC | SumC
 type RecordT = 'CompositeT 'RecordC
@@ -106,12 +110,12 @@ newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
 
 data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
-    TInst :: String -> !(Map String (ast 'TypeT)) -> TypeAST 'TypeT ast
+    TInst :: Text -> !(Map Text (ast 'TypeT)) -> TypeAST 'TypeT ast
     TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
     TSum :: !(ast SumT) -> Type ast
     TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
     TCompositeExtend ::
-        IsCompositeTag c => String -> !(ast 'TypeT) ->
+        IsCompositeTag c => Text -> !(ast 'TypeT) ->
         !(ast ('CompositeT c)) ->
         TypeAST ('CompositeT c) ast
 
@@ -159,7 +163,7 @@ _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
     _ -> Nothing
 
-_TInst :: Lens.Prism' (Type ast) (String, Map String (ast 'TypeT))
+_TInst :: Lens.Prism' (Type ast) (Text, Map Text (ast 'TypeT))
 _TInst = Lens.prism' (uncurry TInst) $ \case
     TInst n p -> Just (n, p)
     _ -> Nothing
@@ -179,7 +183,7 @@ _TEmptyComposite = Lens.prism' (\() -> TEmptyComposite) $ \case
     TEmptyComposite -> Just ()
     _ -> Nothing
 
-_TCompositeExtend :: Lens.Prism' (Record ast) (String, ast 'TypeT, ast RecordT)
+_TCompositeExtend :: Lens.Prism' (Record ast) (Text, ast 'TypeT, ast RecordT)
 _TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
     TCompositeExtend n t r -> Just (n, t, r)
     _ -> Nothing
@@ -190,7 +194,7 @@ instance (Pretty (ast 'TypeT), Pretty (ast RecordT), Pretty (ast SumT)) => Prett
         TFun a b ->
             maybeParens (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
-        TInst name params -> "#" <> text name <+> pPrint params
+        TInst name params -> "#" <> bs name <+> MapPretty.pPrintWith bs pPrint params
         TRecord r -> pPrintPrec level prec r
         TSum s -> pPrintPrec level prec s
 
@@ -200,13 +204,13 @@ instance (IsCompositeTag c, Pretty (ast 'TypeT), Pretty (ast ('CompositeT c))) =
         TEmptyComposite -> "{}"
         TCompositeExtend n t r ->
             maybeParens (prec > 1) $
-            "{" <+> text n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+>
+            "{" <+> bs n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+>
             text [compositeChar (Proxy :: Proxy c)] <+> pPrintPrec level 1 r
 
 
 data Leaf
-    = LVar String
-    | LGlobal String
+    = LVar Text
+    | LGlobal Text
     | LEmptyRecord
     | LAbsurd
     | LInt Int
@@ -214,29 +218,29 @@ data Leaf
     deriving (Show)
 
 instance Pretty Leaf where
-    pPrint (LVar x) = text x
-    pPrint (LGlobal x) = text x
+    pPrint (LVar x) = bs x
+    pPrint (LGlobal x) = bs x
     pPrint LEmptyRecord = "{}"
     pPrint LAbsurd = "Absurd"
     pPrint (LInt x) = pPrint x
     pPrint LHole = "?"
 
-data Abs v = Abs String !v
+data Abs v = Abs Text !v
     deriving (Show, Functor, Foldable, Traversable)
 
 data App v = App !v !v
     deriving (Show, Functor, Foldable, Traversable)
 
-data RecExtend v = RecExtend String !v !v
+data RecExtend v = RecExtend Text !v !v
     deriving (Show, Functor, Foldable, Traversable)
 
-data Case v = Case String !v !v
+data Case v = Case Text !v !v
     deriving (Show, Functor, Foldable, Traversable)
 
-data GetField v = GetField !v String
+data GetField v = GetField !v Text
     deriving (Show, Functor, Foldable, Traversable)
 
-data Inject v = Inject String !v
+data Inject v = Inject Text !v
     deriving (Show, Functor, Foldable, Traversable)
 
 data Val v
@@ -252,26 +256,26 @@ data Val v
 instance Pretty v => Pretty (Val v) where
     pPrintPrec level prec (BLam (Abs name body)) =
         maybeParens (prec > 0) $
-        text name <+> "=>" <+> pPrintPrec level 0 body
+        bs name <+> "=>" <+> pPrintPrec level 0 body
     pPrintPrec level prec (BApp (App func arg)) =
         maybeParens (prec > 9) $
         pPrintPrec level 9 func <+> pPrintPrec level 10 arg
     pPrintPrec level prec (BRecExtend (RecExtend name val rest)) =
         maybeParens (prec > 7) $
-        "{" <> text name <> "="
+        "{" <> bs name <> "="
         <> pPrintPrec level 8 val <+> "} *"
         <+> pPrintPrec level 7 rest
     pPrintPrec level prec (BCase (Case name handler restHandler)) =
         maybeParens (prec > 7) $
-        text name <> "->"
+        bs name <> "->"
         <> pPrintPrec level 8 handler $+$
         "_ ->" <+> pPrintPrec level 7 restHandler
     pPrintPrec level prec (BGetField (GetField val name)) =
         maybeParens (prec > 8) $
-        pPrintPrec level 8 val <> "." <> text name
+        pPrintPrec level 8 val <> "." <> bs name
     pPrintPrec level prec (BInject (Inject name val)) =
         maybeParens (prec > 8) $
-        text name <+> pPrintPrec level 8 val
+        bs name <+> pPrintPrec level 8 val
     pPrintPrec level prec (BLeaf leaf) = pPrintPrec level prec leaf
 
 newtype V = V (Val V)
@@ -304,14 +308,14 @@ infixr 4 ~>
 (~>) :: T 'TypeT -> T 'TypeT -> T 'TypeT
 a ~> b = T $ TFun a b
 
-compositeFrom :: IsCompositeTag c => [(String, T 'TypeT)] -> T ('CompositeT c)
+compositeFrom :: IsCompositeTag c => [(Text, T 'TypeT)] -> T ('CompositeT c)
 compositeFrom [] = T TEmptyComposite
 compositeFrom ((name, typ):fs) = T $ TCompositeExtend name typ $ compositeFrom fs
 
-recordType :: [(String, T 'TypeT)] -> T 'TypeT
+recordType :: [(Text, T 'TypeT)] -> T 'TypeT
 recordType = T . TRecord . compositeFrom
 
-tInst :: String -> Map String (T 'TypeT) -> T 'TypeT
+tInst :: Text -> Map Text (T 'TypeT) -> T 'TypeT
 tInst name params = T $ TInst name params
 
 intType :: T 'TypeT
@@ -320,22 +324,22 @@ intType = tInst "Int" Map.empty
 boolType :: T 'TypeT
 boolType = tInst "Bool" Map.empty
 
-lam :: String -> V -> V
+lam :: Text -> V -> V
 lam name body = V $ BLam $ Abs name body
 
-lambda :: String -> (V -> V) -> V
-lambda name body = lam name $ body (fromString name)
+lambda :: Text -> (V -> V) -> V
+lambda name body = lam name $ body $ var $ name
 
-lambdaRecord :: String -> [String] -> ([V] -> V) -> V
+lambdaRecord :: Text -> [Text] -> ([V] -> V) -> V
 lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
 
 absurd :: V
 absurd = V $ BLeaf LAbsurd
 
-case_ :: String -> V -> V -> V
+case_ :: Text -> V -> V -> V
 case_ name handler restHandlers = V $ BCase $ Case name handler restHandlers
 
-cases :: [(String, V)] -> V
+cases :: [(Text, V)] -> V
 cases = foldr (uncurry case_) absurd
 
 litInt :: Int -> V
@@ -348,31 +352,34 @@ infixl 4 $$
 ($$) :: V -> V -> V
 ($$) f a = V $ BApp $ App f a
 
-($$:) :: V -> [(String, V)] -> V
+($$:) :: V -> [(Text, V)] -> V
 func $$: fields = func $$ recVal fields
 
-recVal :: [(String, V)] -> V
+recVal :: [(Text, V)] -> V
 recVal = foldr extend empty
     where
         extend (name, val) rest = V $ BRecExtend (RecExtend name val rest)
         empty = V $ BLeaf LEmptyRecord
 
-($=) :: String -> V -> V -> V
+($=) :: Text -> V -> V -> V
 (x $= y) z = V $ BRecExtend $ RecExtend x y z
 
-($.) :: V -> String -> V
+($.) :: V -> Text -> V
 x $. y = V $ BGetField $ GetField x y
 
-(.$) :: String -> V -> V
+(.$) :: Text -> V -> V
 x .$ y = V $ BInject $ Inject x y
 
-global :: String -> V
+var :: Text -> V
+var = V . BLeaf . LVar
+
+global :: Text -> V
 global = V . BLeaf . LGlobal
 
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
 infixType a b c = recordType [("l", a), ("r", b)] ~> c
 
-infixApp :: String -> V -> V -> V
+infixApp :: Text -> V -> V -> V
 infixApp name x y = global name $$: [("l", x), ("r", y)]
 
 ($+) :: V -> V -> V
@@ -381,14 +388,11 @@ infixApp name x y = global name $$: [("l", x), ("r", y)]
 ($-) :: V -> V -> V
 ($-) = infixApp "-"
 
-instance IsString V where
-    fromString = V . BLeaf . LVar
-
 data Err
     = DoesNotUnify Doc Doc
-    | VarNotInScope String
+    | VarNotInScope Text
     | InfiniteType
-    | DuplicateFields [String]
+    | DuplicateFields [Text]
     deriving (Show)
 
 intercalate :: Doc -> [Doc] -> Doc
@@ -398,12 +402,12 @@ instance Pretty Err where
     pPrint (DoesNotUnify expected got) =
         "expected:" <+> expected <+> "but got:" <+> got
     pPrint (VarNotInScope name) =
-        text name <+> "not in scope!"
+        bs name <+> "not in scope!"
     pPrint InfiniteType =
         "Infinite type encountered"
     pPrint (DuplicateFields names) =
         "Duplicate fields in record:" <+>
-        (intercalate ", " . map text) names
+        (intercalate ", " . map bs) names
 
 newtype Env s = Env { envFresh :: STRef s Int }
 
@@ -451,7 +455,7 @@ modify' f =
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
-    CompositeConstraints :: !(Set String) -> Constraints ('CompositeT c)
+    CompositeConstraints :: !(Set Text) -> Constraints ('CompositeT c)
 
 instance NFData (Constraints tag) where
     rnf TypeConstraints = ()
@@ -511,7 +515,7 @@ pPrintTV (tv, constraints) =
         suffix :: Constraints tag -> Doc
         suffix TypeConstraints = ""
         suffix (CompositeConstraints cs) =
-            "∉" <> (intercalate " " . map pPrint) (Set.toList cs)
+            "∉" <> (intercalate " " . map bs) (Set.toList cs)
 
 instance Pretty SchemeBinders where
     pPrint (SchemeBinders tvs rtvs stvs) =
@@ -526,26 +530,26 @@ instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
         | otherwise = pPrint binders <> "." <+> pPrint typ
 
 data Scope s = Scope
-    { _scopeLocals :: Map String (UFType s)
-    , _scopeGlobals :: Map String (Scheme 'TypeT)
+    { _scopeLocals :: Map Text (UFType s)
+    , _scopeGlobals :: Map Text (Scheme 'TypeT)
     }
 
-newScope :: Map String (Scheme 'TypeT) -> Scope s
+newScope :: Map Text (Scheme 'TypeT) -> Scope s
 newScope = Scope Map.empty
 
 emptyScope :: Scope s
 emptyScope = Scope Map.empty Map.empty
 
 {-# INLINE lookupLocal #-}
-lookupLocal :: String -> Scope s -> Maybe (UFType s)
+lookupLocal :: Text -> Scope s -> Maybe (UFType s)
 lookupLocal str (Scope locals _) = Map.lookup str locals
 
 {-# INLINE lookupGlobal #-}
-lookupGlobal :: String -> Scope s -> Maybe (Scheme 'TypeT)
+lookupGlobal :: Text -> Scope s -> Maybe (Scheme 'TypeT)
 lookupGlobal str (Scope _ globals) = Map.lookup str globals
 
 {-# INLINE insertLocal #-}
-insertLocal :: String -> UFType s -> Scope s -> Scope s
+insertLocal :: Text -> UFType s -> Scope s -> Scope s
 insertLocal name typ (Scope locals globals) =
     Scope (Map.insert name typ locals) globals
 
@@ -627,7 +631,7 @@ unifyMatch expected vTyp prism =
     Just vcontent -> return vcontent
 
 data CompositeTailType = CompositeTailOpen | CompositeTailClosed
-type CompositeFields s = Map String (UFType s)
+type CompositeFields s = Map Text (UFType s)
 
 data FlatComposite c s = FlatComposite
     { __fcTailUF :: UFComposite c s
@@ -655,6 +659,9 @@ unflatten tail fields =
         go [] = return tail
         go ((name, typ):fs) = go fs <&> TCompositeExtend name typ >>= wrap
 
+prettyFieldNames :: Map Text a -> Doc
+prettyFieldNames = intercalate " " . map bs . Map.keys
+
 {-# INLINE unifyClosedComposites #-}
 unifyClosedComposites :: CompositeFields s -> CompositeFields s -> Infer s ()
 unifyClosedComposites uFields vFields
@@ -662,8 +669,8 @@ unifyClosedComposites uFields vFields
     | otherwise =
           throwError $
           DoesNotUnify
-          ("Record fields:" <+> pPrint (Map.keys uFields))
-          ("Record fields:" <+> pPrint (Map.keys vFields))
+          ("Record fields:" <+> prettyFieldNames uFields)
+          ("Record fields:" <+> prettyFieldNames vFields)
 
 {-# INLINE unifyOpenComposite #-}
 unifyOpenComposite ::
@@ -678,8 +685,8 @@ unifyOpenComposite (uFields, uTail) (vFields, vTail)
     | otherwise =
           throwError $
           DoesNotUnify
-          ("Record with at least fields:" <+> pPrint (Map.keys uFields))
-          ("Record fields:" <+> pPrint (Map.keys vFields))
+          ("Record with at least fields:" <+> prettyFieldNames uFields)
+          ("Record fields:" <+> prettyFieldNames vFields)
 
     where
         uniqueUFields = uFields `Map.difference` vFields
@@ -777,7 +784,7 @@ unify f u v =
             & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
 unifyTInstParams ::
-    Err -> Map String (UFType s) -> Map String (UFType s) -> Infer s ()
+    Err -> Map Text (UFType s) -> Map Text (UFType s) -> Infer s ()
 unifyTInstParams err uParams vParams
     | uSize /= vSize = throwError err
     | uSize == 0 = return ()
@@ -939,7 +946,7 @@ forAll nTvs nRtvs nStvs mkType =
         rtvs = map TVarName [nTvs+1..nTvs+nRtvs]
         stvs = map TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
 
-globals :: Map String (Scheme 'TypeT)
+globals :: Map Text (Scheme 'TypeT)
 globals =
     mconcat
     [ "+" ==> intInfix
@@ -961,19 +968,19 @@ test x =
 
 
 example1 :: V
-example1 = lam "x" $ lam "y" $ "x" $$ "y" $$ "y"
+example1 = lam "x" $ lam "y" $ var "x" $$ var "y" $$ var "y"
 
 example2 :: V
-example2 = lam "x" $ recVal [] & "x" $= "x" & "y" $= lam "x" "x"
+example2 = lam "x" $ recVal [] & "x" $= var "x" & "y" $= lambda "x" id
 
 example3 :: V
-example3 = lam "x" $ ("x" $. "y") $$ (lam "a" "a")
+example3 = lam "x" $ (var "x" $. "y") $$ lambda "a" id
 
 example4 :: V
-example4 = lam "x" $ "x" $$ "x"
+example4 = lam "x" $ var "x" $$ var "x"
 
 example5 :: V
-example5 = lam "x" $ ("x" $. "y") $$ ("x" $. "y")
+example5 = lam "x" $ (var "x" $. "y") $$ (var "x" $. "y")
 
 example6 :: V
 example6 = recVal [("x", recVal []), ("y", recVal [])]

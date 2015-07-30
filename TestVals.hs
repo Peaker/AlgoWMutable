@@ -15,11 +15,11 @@ module TestVals
 
 import           Prelude.Compat
 
+import           Data.Text (Text)
 -- -- import           Control.Lens.Operators
 import qualified Data.Map as Map
 -- -- import           Data.Monoid (Monoid(..), (<>))
 -- -- import qualified Data.Set as Set
-import           Data.String (IsString(..))
 import           Type
 
 type TType = T 'TypeT
@@ -27,15 +27,15 @@ type TType = T 'TypeT
 -- TODO: $$ to be type-classed for TApp vs BApp
 -- TODO: TCon "->" instead of TFun
 
-eLet :: String -> V -> (V -> V) -> V
+eLet :: Text -> V -> (V -> V) -> V
 eLet name val mkBody = lam name body $$ val
     where
-        body = mkBody $ fromString name
+        body = mkBody $ var name
 
-whereItem :: String -> V -> (V -> V) -> V
+whereItem :: Text -> V -> (V -> V) -> V
 whereItem name val mkBody = lambda name mkBody $$ val
 
--- openRecordType :: String -> [(String, TType)] -> TType
+-- openRecordType :: Text -> [(Text, TType)] -> TType
 -- openRecordType tv = TRecord . foldr (uncurry RecExtend) (CVar tv)
 
 -- listTypePair :: (Id, Nominal)
@@ -124,7 +124,7 @@ listOf = tInst "List" . Map.singleton "elem"
 --         tvA = "a"
 --         tvB = "b"
 
--- xGetter :: (String -> Constraints) -> Nominal
+-- xGetter :: (Text -> Constraints) -> Nominal
 -- xGetter constraints =
 --     Nominal
 --     { nParams = Map.empty
@@ -133,7 +133,7 @@ listOf = tInst "List" . Map.singleton "elem"
 --         openRecordType tvRest [("x", a)] ~> a
 --     }
 --     where
---         tvRest :: String
+--         tvRest :: Text
 --         tvRest = "rest"
 --         a = TV.lift tvA
 --         tvA :: TypeVar
@@ -328,7 +328,7 @@ solveDepressedQuarticVal =
         (%*) = inf "*"
         (%/) = inf "/"
 
-inf :: String -> V -> V -> V
+inf :: Text -> V -> V -> V
 inf str x y = global str $$ infixArgs x y
 
 -- factorsVal :: V
