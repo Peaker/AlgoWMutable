@@ -60,7 +60,7 @@ incSize (Zone sizeRef mvectorRef) =
             then
             do
                 doubleMvector <- MV.new (2 * len)
-                MV.copy mvector $ MV.slice 0 len doubleMvector
+                MV.copy (MV.slice 0 len doubleMvector) mvector
                 writeSTRef mvectorRef doubleMvector
                 return doubleMvector
             else
