@@ -47,6 +47,7 @@ module Type
     , runTests
     ) where
 
+import           Data.String (IsString)
 import           Prelude.Compat hiding (abs, tail)
 
 import           Control.DeepSeq (NFData(..))
@@ -110,9 +111,15 @@ instance IsCompositeTag c => IsTag ('CompositeT c) where
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
 
+newtype TId = TId { tidString :: Text }
+    deriving (Eq, Ord, Show, NFData, IsString)
+
+instance Pretty TId where
+    pPrint = bs . tidString
+
 data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
-    TInst :: Text -> !(Map Text (ast 'TypeT)) -> TypeAST 'TypeT ast
+    TInst :: TId -> !(Map Text (ast 'TypeT)) -> TypeAST 'TypeT ast
     TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
     TSum :: !(ast SumT) -> Type ast
     TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
@@ -165,7 +172,7 @@ _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
     _ -> Nothing
 
-_TInst :: Lens.Prism' (Type ast) (Text, Map Text (ast 'TypeT))
+_TInst :: Lens.Prism' (Type ast) (TId, Map Text (ast 'TypeT))
 _TInst = Lens.prism' (uncurry TInst) $ \case
     TInst n p -> Just (n, p)
     _ -> Nothing
@@ -196,7 +203,7 @@ instance (Pretty (ast 'TypeT), Pretty (ast RecordT), Pretty (ast SumT)) => Prett
         TFun a b ->
             maybeParens (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
-        TInst name params -> "#" <> bs name <+> MapPretty.pPrintWith bs pPrint params
+        TInst name params -> "#" <> pPrint name <+> MapPretty.pPrintWith bs pPrint params
         TRecord r -> pPrintPrec level prec r
         TSum s -> pPrintPrec level prec s
 
@@ -317,7 +324,7 @@ compositeFrom ((name, typ):fs) = T $ TCompositeExtend name typ $ compositeFrom f
 recordType :: [(Text, T 'TypeT)] -> T 'TypeT
 recordType = T . TRecord . compositeFrom
 
-tInst :: Text -> Map Text (T 'TypeT) -> T 'TypeT
+tInst :: TId -> Map Text (T 'TypeT) -> T 'TypeT
 tInst name params = T $ TInst name params
 
 intType :: T 'TypeT
