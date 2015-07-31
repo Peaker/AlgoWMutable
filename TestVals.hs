@@ -15,7 +15,6 @@ module TestVals
 
 import           Prelude.Compat
 
-import           Data.Text (Text)
 -- -- import           Control.Lens.Operators
 import qualified Data.Map as Map
 -- -- import           Data.Monoid (Monoid(..), (<>))
@@ -27,12 +26,12 @@ type TType = T 'TypeT
 -- TODO: $$ to be type-classed for TApp vs BApp
 -- TODO: TCon "->" instead of TFun
 
-eLet :: Text -> V -> (V -> V) -> V
+eLet :: Var -> V -> (V -> V) -> V
 eLet name val mkBody = lam name body $$ val
     where
         body = mkBody $ var name
 
-whereItem :: Text -> V -> (V -> V) -> V
+whereItem :: Var -> V -> (V -> V) -> V
 whereItem name val mkBody = lambda name mkBody $$ val
 
 -- openRecordType :: Text -> [(Text, TType)] -> TType
@@ -328,7 +327,7 @@ solveDepressedQuarticVal =
         (%*) = inf "*"
         (%/) = inf "/"
 
-inf :: Text -> V -> V -> V
+inf :: GlobalId -> V -> V -> V
 inf str x y = global str $$ infixArgs x y
 
 -- factorsVal :: V
