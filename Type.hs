@@ -66,7 +66,7 @@ import           Data.Proxy (Proxy(..))
 import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
-import           Data.Type.Equality
+import           Data.Type.Equality ((:~:)(..))
 import qualified Data.UnionFind.ST as UF
 import           GHC.Generics (Generic)
 import qualified MapPretty as MapPretty
@@ -733,17 +733,20 @@ unifyComposite uUf vUf =
                     (CompositeTailClosed, CompositeTailOpen  ) -> unifyOpenComposite vFlat uFlat
                     (CompositeTailOpen  , CompositeTailOpen  ) -> unifyOpenComposites uFlat vFlat
 
-constraintsCheck :: UFTypeAST s tag -> Constraints tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
-constraintsCheck _ TypeConstraints _ = return ()
-constraintsCheck uf old@(CompositeConstraints names) r =
+constraintsCheck ::
+    Constraints tag -> UFTypeAST s tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
+constraintsCheck TypeConstraints _ _ = return ()
+constraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) innerUF inner =
     do
-        FlatComposite tail fields tailType constraints <- flattenVal uf r
-        let forbidden = Set.intersection (Map.keysSet fields) names
-        unless (Set.null forbidden) $ throwError $ DuplicateFields $
-            Set.toList forbidden
-        case tailType of
+        FlatComposite innerTail innerFields innerTailType innerConstraints <-
+            flattenVal innerUF inner
+        let duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
+        unless (Set.null duplicates) $ throwError $ DuplicateFields $
+            Set.toList duplicates
+        case innerTailType of
             CompositeTailClosed -> return ()
-            CompositeTailOpen -> setConstraints tail (old `mappend` constraints)
+            CompositeTailOpen ->
+                setConstraints innerTail (outerConstraints `mappend` innerConstraints)
 
 setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
@@ -775,8 +778,8 @@ unify f u v =
         g (TypeASTPosition uNames uMTyp) (TypeASTPosition vNames vMTyp) =
             case (uMTyp, vMTyp) of
             (Left uCs, Left vCs) -> (Left (uCs `mappend` vCs), return ())
-            (Left uCs, Right y) -> (Right y, constraintsCheck v uCs y)
-            (Right x, Left vCs) -> (Right x, constraintsCheck u vCs x)
+            (Left uCs, Right y) -> (Right y, constraintsCheck uCs v y)
+            (Right x, Left vCs) -> (Right x, constraintsCheck vCs u x)
             (Right x, Right y) -> (Right x, f x y)
             & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
