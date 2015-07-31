@@ -1,10 +1,11 @@
-{-# LANGUAGE RankNTypes, NoImplicitPrelude #-}
+{-# LANGUAGE RankNTypes, NoImplicitPrelude, GeneralizedNewtypeDeriving #-}
 module RefZone
     ( Zone, new
     , Frozen, freeze, clone
     , Ref, newRef, readRef, writeRef, modifyRef
     ) where
 
+import           Control.DeepSeq (NFData(..))
 import           Control.Lens.Operators
 import           Control.Monad.ST (ST, runST)
 import           Data.STRef
@@ -26,11 +27,11 @@ data Zone s = Zone
     { _zoneSizeRef :: !(STRef s Int) -- vector grows beyond this
     , zoneVectorRef :: !(STRef s (MV.STVector s Box))
     }
+instance NFData (Zone s) where rnf (Zone s v) = s `seq` v `seq` ()
 
 newtype Frozen = Frozen (V.Vector Box)
 
-newtype Ref a = Ref Int
-    deriving (Eq)
+newtype Ref a = Ref Int deriving (Eq, NFData)
 
 {-# INLINE initialSize #-}
 initialSize :: Int

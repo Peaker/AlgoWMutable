@@ -242,6 +242,13 @@ data Leaf
     | LInt Int
     | LHole
     deriving (Show)
+instance NFData Leaf where
+    rnf (LVar x) = rnf x
+    rnf (LGlobal x) = rnf x
+    rnf (LInt x) = rnf x
+    rnf LEmptyRecord = ()
+    rnf LAbsurd = ()
+    rnf LHole = ()
 
 instance Pretty Leaf where
     pPrint (LVar x) = pPrint x
@@ -253,21 +260,27 @@ instance Pretty Leaf where
 
 data Abs v = Abs Var !v
     deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (Abs v) where rnf (Abs a b) = rnf a `seq` rnf b
 
 data App v = App !v !v
     deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (App v) where rnf (App a b) = rnf a `seq` rnf b
 
 data RecExtend v = RecExtend Tag !v !v
     deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (RecExtend v) where rnf (RecExtend a b c) = rnf a `seq` rnf b `seq` rnf c
 
 data Case v = Case Tag !v !v
     deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (Case v) where rnf (Case a b c) = rnf a `seq` rnf b `seq` rnf c
 
 data GetField v = GetField !v Tag
     deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (GetField v) where rnf (GetField a b) = rnf a `seq` rnf b
 
 data Inject v = Inject Tag !v
     deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (Inject v) where rnf (Inject a b) = rnf a `seq` rnf b
 
 data Val v
     = BLam (Abs v)
@@ -278,6 +291,15 @@ data Val v
     | BInject (Inject v)
     | BLeaf Leaf
     deriving (Show, Functor, Foldable, Traversable)
+
+instance NFData v => NFData (Val v) where
+    rnf (BLam x) = rnf x
+    rnf (BApp x) = rnf x
+    rnf (BRecExtend x) = rnf x
+    rnf (BCase x) = rnf x
+    rnf (BGetField x) = rnf x
+    rnf (BInject x) = rnf x
+    rnf (BLeaf x) = rnf x
 
 instance Pretty v => Pretty (Val v) where
     pPrintPrec level prec (BLam (Abs name body)) =
@@ -319,6 +341,8 @@ instance Pretty a => Pretty (AV a) where
         pPrintPrec level 10 v
         where
             annDoc = pPrint ann
+instance NFData a => NFData (AV a) where
+    rnf (AV ann val) = rnf ann `seq` rnf val
 
 data T tag
     = T (TypeAST tag T)
@@ -512,16 +536,16 @@ instance Monoid (Constraints ('CompositeT c)) where
     mappend (CompositeConstraints x) (CompositeConstraints y) =
         CompositeConstraints (x `mappend` y)
 
-data TypeASTPosition s tag = TypeASTPosition
+data TypeASTPosition tag = TypeASTPosition
     { __tastPosNames :: Set (TVarName tag)
-    , _tastPosType :: Either (Constraints tag) (TypeAST tag (UFTypeAST s))
+    , _tastPosType :: Either (Constraints tag) (TypeAST tag UFTypeAST)
     }
 
-type UFType s = UFTypeAST s 'TypeT
-type UFComposite c s = UFTypeAST s ('CompositeT c)
-newtype UFTypeAST s tag = TS { tsUF :: UF.Point s (TypeASTPosition s tag) }
-instance Pretty (UFTypeAST s tag) where
-    pPrint _ = ".."
+type UFType = UFTypeAST 'TypeT
+type UFComposite c s = UFTypeAST ('CompositeT c)
+newtype UFTypeAST tag = TS { tsUF :: UF.Point (TypeASTPosition tag) }
+    deriving (NFData)
+instance Pretty (UFTypeAST tag) where pPrint _ = ".."
 
 Lens.makeLenses ''TypeASTPosition
 
@@ -571,27 +595,27 @@ instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
         | nullBinders binders = pPrint typ
         | otherwise = pPrint binders <> "." <+> pPrint typ
 
-data Scope s = Scope
-    { _scopeLocals :: Map Var (UFType s)
+data Scope = Scope
+    { _scopeLocals :: Map Var (UFType)
     , _scopeGlobals :: Map GlobalId (Scheme 'TypeT)
     }
 
-newScope :: Map GlobalId (Scheme 'TypeT) -> Scope s
+newScope :: Map GlobalId (Scheme 'TypeT) -> Scope
 newScope = Scope Map.empty
 
-emptyScope :: Scope s
+emptyScope :: Scope
 emptyScope = Scope Map.empty Map.empty
 
 {-# INLINE lookupLocal #-}
-lookupLocal :: Var -> Scope s -> Maybe (UFType s)
+lookupLocal :: Var -> Scope -> Maybe (UFType)
 lookupLocal str (Scope locals _) = Map.lookup str locals
 
 {-# INLINE lookupGlobal #-}
-lookupGlobal :: GlobalId -> Scope s -> Maybe (Scheme 'TypeT)
+lookupGlobal :: GlobalId -> Scope -> Maybe (Scheme 'TypeT)
 lookupGlobal str (Scope _ globals) = Map.lookup str globals
 
 {-# INLINE insertLocal #-}
-insertLocal :: Var -> UFType s -> Scope s -> Scope s
+insertLocal :: Var -> UFType -> Scope -> Scope
 insertLocal name typ (Scope locals globals) =
     Scope (Map.insert name typ locals) globals
 
@@ -601,8 +625,8 @@ freshTVarName = nextFresh <&> TVarName
 
 {-# INLINE newPosition #-}
 newPosition ::
-    Either (Constraints tag) (TypeAST tag (UFTypeAST s)) ->
-    Infer s (UFTypeAST s tag)
+    Either (Constraints tag) (TypeAST tag UFTypeAST) ->
+    Infer s (UFTypeAST tag)
 newPosition t =
     do
         tvarName <- freshTVarName
@@ -611,31 +635,31 @@ newPosition t =
             & liftST . UF.fresh zone <&> TS
 
 {-# INLINE freshTVar #-}
-freshTVar :: Constraints tag -> Infer s (UFTypeAST s tag)
+freshTVar :: Constraints tag -> Infer s (UFTypeAST tag)
 freshTVar = newPosition . Left
 
 {-# INLINE wrap #-}
-wrap :: TypeAST tag (UFTypeAST s) -> Infer s (UFTypeAST s tag)
+wrap :: TypeAST tag UFTypeAST -> Infer s (UFTypeAST tag)
 wrap = newPosition . Right
 
-instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (UFTypeAST s tag)
+instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (UFTypeAST tag)
 instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
     do
         typeUFs <- traverse freshTVar typeVars
         recordUFs <- traverse freshTVar recordVars
         sumUFs <- traverse freshTVar sumVars
-        let lookupTVar :: forall t. IsTag t => TVarName t -> UFTypeAST s t
+        let lookupTVar :: forall t. IsTag t => TVarName t -> UFTypeAST t
             lookupTVar tvar =
                 case tagRefl :: ASTTagEquality t of
                 IsTypeT Refl -> typeUFs Map.! tvar
                 IsCompositeT (IsRecordC Refl) Refl -> recordUFs Map.! tvar
                 IsCompositeT (IsSumC Refl) Refl -> sumUFs Map.! tvar
-        let go :: forall t. IsTag t => T t -> Infer s (UFTypeAST s t)
+        let go :: forall t. IsTag t => T t -> Infer s (UFTypeAST t)
             go (TVar tvarName) = return (lookupTVar tvarName)
             go (T typeAST) = typeSubexprs go typeAST >>= wrap
         go typ
 
-getWrapper :: UFTypeAST s tag -> Infer s (TypeASTPosition s tag)
+getWrapper :: UFTypeAST tag -> Infer s (TypeASTPosition tag)
 getWrapper (TS r) =
     do
         zone <- getEnv <&> envZone
@@ -644,7 +668,7 @@ getWrapper (TS r) =
 deref ::
     forall s tag. IsTag tag =>
     Set Int ->
-    UFTypeAST s tag -> WriterT SchemeBinders (Infer s) (T tag)
+    UFTypeAST tag -> WriterT SchemeBinders (Infer s) (T tag)
 deref visited ts =
     lift (getWrapper ts) >>= \(TypeASTPosition names typ) ->
     let tvName = Set.findMin names
@@ -664,7 +688,7 @@ deref visited ts =
             binders = Map.singleton tvName cs
     Right t -> t & typeSubexprs (deref (Set.insert (_tVarName tvName) visited)) <&> T
 
-generalize :: UFType s -> Infer s (Scheme 'TypeT)
+generalize :: UFType -> Infer s (Scheme 'TypeT)
 generalize t =
     deref Set.empty t
     & runWriterT
@@ -677,7 +701,7 @@ unifyMatch expected vTyp prism =
     Just vcontent -> return vcontent
 
 data CompositeTailType = CompositeTailOpen | CompositeTailClosed
-type CompositeFields s = Map Tag (UFType s)
+type CompositeFields s = Map Tag (UFType)
 
 data FlatComposite c s = FlatComposite
     { __fcTailUF :: UFComposite c s
@@ -688,7 +712,7 @@ data FlatComposite c s = FlatComposite
 
 Lens.makeLenses ''FlatComposite
 
-flattenVal :: UFComposite c s -> Composite c (UFTypeAST s) -> Infer s (FlatComposite c s)
+flattenVal :: UFComposite c s -> Composite c UFTypeAST -> Infer s (FlatComposite c s)
 flattenVal uf TEmptyComposite = return $ FlatComposite uf Map.empty CompositeTailClosed mempty
 flattenVal _ (TCompositeExtend n t r) =
     flatten r <&> fcFields . Lens.at n ?~ t
@@ -780,7 +804,7 @@ unifyComposite uUf vUf =
                     (CompositeTailOpen  , CompositeTailOpen  ) -> unifyOpenComposites uFlat vFlat
 
 constraintsCheck ::
-    Constraints tag -> UFTypeAST s tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
+    Constraints tag -> UFTypeAST tag -> TypeAST tag UFTypeAST -> Infer s ()
 constraintsCheck TypeConstraints _ _ = return ()
 constraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) innerUF inner =
     do
@@ -794,7 +818,7 @@ constraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) innerUF
             CompositeTailOpen ->
                 setConstraints innerTail (outerConstraints `mappend` innerConstraints)
 
-setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
+setConstraints :: Monoid (Constraints tag) => UFTypeAST tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
     do
         zone <- getEnv <&> envZone
@@ -803,7 +827,7 @@ setConstraints u constraints =
 
 
 {-# INLINE union #-}
-union :: Zone s -> UF.Point s a -> UF.Point s a -> (a -> a -> (a, b)) -> ST s (Maybe b)
+union :: Zone s -> UF.Point a -> UF.Point a -> (a -> a -> (a, b)) -> ST s (Maybe b)
 union zone x y f =
     do
         ref <- newSTRef $ Nothing
@@ -816,9 +840,9 @@ union zone x y f =
 
 unify ::
     (IsTag tag, Monoid (Constraints tag)) =>
-    (TypeAST tag (UFTypeAST s) ->
-     TypeAST tag (UFTypeAST s) -> Infer s ()) ->
-    UFTypeAST s tag -> UFTypeAST s tag -> Infer s ()
+    (TypeAST tag UFTypeAST ->
+     TypeAST tag UFTypeAST -> Infer s ()) ->
+    UFTypeAST tag -> UFTypeAST tag -> Infer s ()
 unify f u v =
     do
         zone <- getEnv <&> envZone
@@ -835,7 +859,7 @@ unify f u v =
             & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
 unifyTInstParams ::
-    Err -> Map TParamId (UFType s) -> Map TParamId (UFType s) -> Infer s ()
+    Err -> Map TParamId (UFType) -> Map TParamId (UFType) -> Infer s ()
 unifyTInstParams err uParams vParams
     | uSize /= vSize = throwError err
     | uSize == 0 = return ()
@@ -846,7 +870,7 @@ unifyTInstParams err uParams vParams
         vSize = Map.size vParams
         unifyParam (_, uParam) (_, vParam) = unifyType uParam vParam
 
-unifyType :: UFType s -> UFType s -> Infer s ()
+unifyType :: UFType -> UFType -> Infer s ()
 unifyType =
     unify f
     where
@@ -874,9 +898,9 @@ unifyType =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferFunc s = Scope s -> Infer s (AV (UFType s), UFType s)
+type InferFunc s = Scope -> Infer s (AV (UFType), UFType)
 
-inferRes :: Val (AV (UFType s)) -> UFType s -> (AV (UFType s), UFType s)
+inferRes :: Val (AV (UFType)) -> UFType -> (AV (UFType), UFType)
 inferRes val typ = (AV typ val, typ)
 
 inferLeaf :: Leaf -> InferFunc s
@@ -989,8 +1013,8 @@ infer (V v) =
     BInject x -> inferInject x
     BCase x -> inferCase x
 
-inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
-inferScheme scope x = runInfer $ infer x scope <&> snd >>= generalize
+inferScheme :: Scope -> V -> Either Err (AV UFType, Scheme 'TypeT)
+inferScheme scope x = runInfer $ infer x scope >>= _2 %%~ generalize
 
 forAll ::
     Int -> Int -> Int ->
@@ -1025,7 +1049,7 @@ test x =
     print $ pPrint x <+?>
     case inferScheme (newScope globals) x of
     Left err -> "causes type error:" <+> pPrint err
-    Right typ -> " :: " <+> pPrint typ
+    Right (_, typ) -> " :: " <+> pPrint typ
 
 
 example1 :: V

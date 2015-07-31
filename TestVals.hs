@@ -171,7 +171,7 @@ infixArgs :: V -> V -> V
 infixArgs l r = recVal [("l", l), ("r", r)]
 
 -- env :: Loaded
-env :: Scope s
+env :: Scope
 env = newScope $
     -- Loaded
     -- { loadedGlobalTypes =

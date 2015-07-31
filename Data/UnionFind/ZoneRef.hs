@@ -25,6 +25,7 @@
 -- element.  Consequently future lookups will be have a path length of
 -- at most 1.
 --
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 module Data.UnionFind.ZoneRef
   ( Point, fresh, repr, union, union', equivalent, redundant,
@@ -32,18 +33,19 @@ module Data.UnionFind.ZoneRef
 where
 
 -- import Control.Applicative
+import Control.DeepSeq (NFData)
 import Control.Monad ( when )
 import Control.Monad.ST (ST)
 import RefZone
 
 -- | The abstract type of an element of the sets we work on.  It is
 -- parameterised over the type of the descriptor.
-newtype Point s a = Pt (Ref (Link s a)) deriving Eq
+newtype Point a = Pt (Ref (Link a)) deriving (Eq, NFData)
 
-data Link s a
+data Link a
     = Info {-# UNPACK #-} !(Ref (Info a))
       -- ^ This is the descriptive element of the equivalence class.
-    | Link {-# UNPACK #-} !(Point s a)
+    | Link {-# UNPACK #-} !(Point a)
       -- ^ Pointer to some other element of the equivalence class.
      deriving Eq
 
@@ -55,7 +57,7 @@ data Info a = MkInfo
 
 -- | /O(1)/. Create a fresh point and return it.  A fresh point is in
 -- the equivalence class that contains only itself.
-fresh :: Zone s -> a -> ST s (Point s a)
+fresh :: Zone s -> a -> ST s (Point a)
 fresh zone desc = do
   info <- newRef zone (MkInfo { weight = 1, descr = desc })
   l <- newRef zone (Info info)
@@ -65,7 +67,7 @@ fresh zone desc = do
 -- @point@'s equivalence class.
 --
 -- This method performs the path compresssion.
-repr :: Zone s -> Point s a -> ST s (Point s a)
+repr :: Zone s -> Point a -> ST s (Point a)
 repr zone point@(Pt l) = do
   link <- readRef zone l
   case link of
@@ -84,7 +86,7 @@ repr zone point@(Pt l) = do
 
 -- | Return the reference to the point's equivalence class's
 -- descriptor.
-descrRef :: Zone s -> Point s a -> ST s (Ref (Info a))
+descrRef :: Zone s -> Point a -> ST s (Ref (Info a))
 descrRef zone point@(Pt link_ref) = do
   link <- readRef zone link_ref
   case link of
@@ -97,18 +99,18 @@ descrRef zone point@(Pt link_ref) = do
 
 -- | /O(1)/. Return the descriptor associated with argument point's
 -- equivalence class.
-descriptor :: Zone s -> Point s a -> ST s a
+descriptor :: Zone s -> Point a -> ST s a
 descriptor zone point = do
   descr <$> (readRef zone =<< descrRef zone point)
 
 -- | /O(1)/. Replace the descriptor of the point's equivalence class
 -- with the second argument.
-setDescriptor :: Zone s -> Point s a -> a -> ST s ()
+setDescriptor :: Zone s -> Point a -> a -> ST s ()
 setDescriptor zone point new_descr = do
   r <- descrRef zone point
   modifyRef zone r $ \i -> i { descr = new_descr }
 
-modifyDescriptor :: Zone s -> Point s a -> (a -> a) -> ST s ()
+modifyDescriptor :: Zone s -> Point a -> (a -> a) -> ST s ()
 modifyDescriptor zone point f = do
   r <- descrRef zone point
   modifyRef zone r $ \i -> i { descr = f (descr i) }
@@ -116,7 +118,7 @@ modifyDescriptor zone point f = do
 -- | /O(1)/. Join the equivalence classes of the points (which must be
 -- distinct).  The resulting equivalence class will get the descriptor
 -- of the second argument.
-union :: Zone s -> Point s a -> Point s a -> ST s ()
+union :: Zone s -> Point a -> Point a -> ST s ()
 union zone p1 p2 = union' zone p1 p2 (\_ d2 -> return d2)
 
 -- | Like 'union', but sets the descriptor returned from the callback.
@@ -124,7 +126,7 @@ union zone p1 p2 = union' zone p1 p2 (\_ d2 -> return d2)
 -- The intention is to keep the descriptor of the second argument to
 -- the callback, but the callback might adjust the information of the
 -- descriptor or perform side effects.
-union' :: Zone s -> Point s a -> Point s a -> (a -> a -> ST s a) -> ST s ()
+union' :: Zone s -> Point a -> Point a -> (a -> a -> ST s a) -> ST s ()
 union' zone p1 p2 update = do
   point1@(Pt link_ref1) <- repr zone p1
   point2@(Pt link_ref2) <- repr zone p2
@@ -149,7 +151,7 @@ union' zone p1 p2 update = do
 
 -- | /O(1)/. Return @True@ if both points belong to the same
 -- | equivalence class.
-equivalent :: Zone s -> Point s a -> Point s a -> ST s Bool
+equivalent :: Zone s -> Point a -> Point a -> ST s Bool
 equivalent zone p1 p2 = (==) <$> repr zone p1 <*> repr zone p2
 
 -- | /O(1)/. Returns @True@ for all but one element of an equivalence
@@ -161,7 +163,7 @@ equivalent zone p1 p2 = (==) <$> repr zone p1 <*> repr zone p2
 -- 
 -- It is unspecified for which element function returns @False@, so be
 -- really careful when using this.
-redundant :: Zone s -> Point s a -> ST s Bool
+redundant :: Zone s -> Point a -> ST s Bool
 redundant zone (Pt link_r) = do
   link <- readRef zone link_r
   case link of
