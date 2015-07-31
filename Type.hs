@@ -874,8 +874,8 @@ unifyType =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-inferLeaf :: Scope s -> Leaf -> Infer s (UFType s)
-inferLeaf scope leaf =
+inferLeaf :: Leaf -> Scope s -> Infer s (UFType s)
+inferLeaf leaf scope =
     case leaf of
     LEmptyRecord -> wrap TEmptyComposite >>= wrap . TRecord
     LAbsurd ->
@@ -894,29 +894,29 @@ inferLeaf scope leaf =
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
 
-inferLam :: Scope s -> Abs V -> Infer s (UFType s)
-inferLam scope (Abs n body) =
+inferLam :: Abs V -> Scope s -> Infer s (UFType s)
+inferLam (Abs n body) scope =
     do
         nType <- freshTVar TypeConstraints
-        resType <- infer (insertLocal n nType scope) body
+        resType <- infer body (insertLocal n nType scope)
         TFun nType resType & wrap
 
-inferApp :: Scope s -> App V -> Infer s (UFType s)
-inferApp scope (App fun arg) =
+inferApp :: App V -> Scope s -> Infer s (UFType s)
+inferApp (App fun arg) scope =
     do
-        funTyp <- infer scope fun
-        argTyp <- infer scope arg
+        funTyp <- infer fun scope
+        argTyp <- infer arg scope
         resTyp <- freshTVar TypeConstraints
 
         expectedFunTyp <- TFun argTyp resTyp & wrap
         unifyType expectedFunTyp funTyp
         return resTyp
 
-inferRecExtend :: Scope s -> RecExtend V -> Infer s (UFType s)
-inferRecExtend scope (RecExtend name val rest) =
+inferRecExtend :: RecExtend V -> Scope s -> Infer s (UFType s)
+inferRecExtend (RecExtend name val rest) scope =
     do
-        valTyp <- infer scope val
-        restTyp <- infer scope rest
+        valTyp <- infer val scope
+        restTyp <- infer rest scope
         unknownRestFields <- freshTVar $ CompositeConstraints $ Set.singleton name
         expectedResTyp <- TRecord unknownRestFields & wrap
         unifyType expectedResTyp restTyp
@@ -924,16 +924,16 @@ inferRecExtend scope (RecExtend name val rest) =
             & wrap
             >>= wrap . TRecord
 
-inferCase :: Scope s -> Case V -> Infer s (UFType s)
-inferCase scope (Case name handler restHandler) =
+inferCase :: Case V -> Scope s -> Infer s (UFType s)
+inferCase (Case name handler restHandler) scope =
     do
         resType <- freshTVar TypeConstraints
         let toResType x = TFun x resType & wrap
 
         fieldType <- freshTVar TypeConstraints
 
-        handlerTyp <- infer scope handler
-        restHandlerTyp <- infer scope restHandler
+        handlerTyp <- infer handler scope
+        restHandlerTyp <- infer restHandler scope
 
         sumTail <- freshTVar $ CompositeConstraints $ Set.singleton name
 
@@ -946,11 +946,11 @@ inferCase scope (Case name handler restHandler) =
         TCompositeExtend name fieldType sumTail
             & wrap <&> TSum >>= wrap >>= toResType
 
-inferGetField :: Scope s -> GetField V -> Infer s (UFType s)
-inferGetField scope (GetField val name) =
+inferGetField :: GetField V -> Scope s -> Infer s (UFType s)
+inferGetField (GetField val name) scope =
     do
         resTyp <- freshTVar TypeConstraints
-        valTyp <- infer scope val
+        valTyp <- infer val scope
         expectedValTyp <-
             freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name resTyp
@@ -959,28 +959,28 @@ inferGetField scope (GetField val name) =
         unifyType expectedValTyp valTyp
         return resTyp
 
-inferInject :: Scope s -> Inject V -> Infer s (UFType s)
-inferInject scope (Inject name val) =
+inferInject :: Inject V -> Scope s -> Infer s (UFType s)
+inferInject (Inject name val) scope =
     do
-        valTyp <- infer scope val
+        valTyp <- infer val scope
         freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name valTyp
             >>= wrap
             >>= wrap . TSum
 
-infer :: Scope s -> V -> Infer s (UFType s)
-infer scope (V v) =
+infer :: V -> Scope s -> Infer s (UFType s)
+infer (V v) scope =
     case v of
-    BLeaf l -> inferLeaf scope l
-    BLam abs -> inferLam scope abs
-    BApp app -> inferApp scope app
-    BRecExtend ext -> inferRecExtend scope ext
-    BGetField ext -> inferGetField scope ext
-    BInject ext -> inferInject scope ext
-    BCase ext -> inferCase scope ext
+    BLeaf l -> inferLeaf l scope
+    BLam abs -> inferLam abs scope
+    BApp app -> inferApp app scope
+    BRecExtend ext -> inferRecExtend ext scope
+    BGetField ext -> inferGetField ext scope
+    BInject ext -> inferInject ext scope
+    BCase ext -> inferCase ext scope
 
 inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
-inferScheme scope x = runInfer $ infer scope x >>= generalize
+inferScheme scope x = runInfer $ infer x scope >>= generalize
 
 forAll ::
     Int -> Int -> Int ->
