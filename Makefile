@@ -8,4 +8,8 @@ run: benchmark
 	./$<
 	echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 
+runboosted: benchmark
+	echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
+	./$<
+
 .PHONY: benchmark run
