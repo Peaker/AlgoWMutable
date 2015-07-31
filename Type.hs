@@ -637,18 +637,19 @@ data FlatComposite c s = FlatComposite
     { __fcTailUF :: UFComposite c s
     , _fcFields :: CompositeFields s
     , __fcTailType :: CompositeTailType
+    , __fcTailConstraints :: Constraints ('CompositeT c)
     }
 
 Lens.makeLenses ''FlatComposite
 
 flattenVal :: UFComposite c s -> Composite c (UFTypeAST s) -> Infer s (FlatComposite c s)
-flattenVal uf TEmptyComposite = return $ FlatComposite uf Map.empty CompositeTailClosed
+flattenVal uf TEmptyComposite = return $ FlatComposite uf Map.empty CompositeTailClosed mempty
 flattenVal _ (TCompositeExtend n t r) =
     flatten r <&> fcFields . Lens.at n ?~ t
     where
         flatten ts =
             getWrapper ts <&> _tastPosType >>= \case
-            Left _ -> return $ FlatComposite ts Map.empty CompositeTailOpen
+            Left cs -> return $ FlatComposite ts Map.empty CompositeTailOpen cs
             Right typ -> flattenVal ts typ
 
 unflatten ::
@@ -674,10 +675,8 @@ unifyClosedComposites uFields vFields
 
 {-# INLINE unifyOpenComposite #-}
 unifyOpenComposite ::
-    IsCompositeTag c =>
-    (CompositeFields s, UFComposite c s) ->
-    (CompositeFields s, UFComposite c s) -> Infer s ()
-unifyOpenComposite (uFields, uTail) (vFields, vTail)
+    IsCompositeTag c => FlatComposite c s -> FlatComposite c s -> Infer s ()
+unifyOpenComposite uOpen vClosed
     | Map.null uniqueUFields =
           do
               tailVal <- unflatten vTail uniqueVFields
@@ -689,25 +688,24 @@ unifyOpenComposite (uFields, uTail) (vFields, vTail)
           ("Record fields:" <+> prettyFieldNames vFields)
 
     where
+        FlatComposite uTail uFields _ _ = uOpen
+        FlatComposite vTail vFields _ _ = vClosed
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
 {-# INLINE unifyOpenComposites #-}
 unifyOpenComposites ::
-    IsCompositeTag c =>
-    (CompositeFields s, UFComposite c s) ->
-    (CompositeFields s, UFComposite c s) -> Infer s ()
-unifyOpenComposites (uFields, uTail) (vFields, vTail) =
+    IsCompositeTag c => FlatComposite c s -> FlatComposite c s -> Infer s ()
+unifyOpenComposites u v =
     do
-        commonRest <-
-            freshTVar $ CompositeConstraints $
-            Map.keysSet uFields `Set.union`
-            Map.keysSet vFields
+        commonRest <- freshTVar $ uConstraints `mappend` vConstraints
         uRest <- unflatten commonRest uniqueVFields
         vRest <- unflatten commonRest uniqueUFields
         unifyComposite uTail uRest
         unifyComposite vTail vRest
     where
+        FlatComposite uTail uFields _ uConstraints = u
+        FlatComposite vTail vFields _ vConstraints = v
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
@@ -725,28 +723,27 @@ unifyComposite uUf vUf =
                 unifyComposite ur vr
         f u v =
             do
-                FlatComposite uTail uFields uType <- flattenVal uUf u
-                FlatComposite vTail vFields vType <- flattenVal vUf v
+                uFlat@(FlatComposite _ uFields uType _) <- flattenVal uUf u
+                vFlat@(FlatComposite _ vFields vType _) <- flattenVal vUf v
                 Map.intersectionWith unifyType uFields vFields
                     & sequenceA_
                 case (uType, vType) of
                     (CompositeTailClosed, CompositeTailClosed) -> unifyClosedComposites uFields vFields
-                    (CompositeTailOpen  , CompositeTailClosed) -> unifyOpenComposite (uFields, uTail) (vFields, vTail)
-                    (CompositeTailClosed, CompositeTailOpen  ) -> unifyOpenComposite (vFields, vTail) (uFields, uTail)
-                    (CompositeTailOpen  , CompositeTailOpen  ) -> unifyOpenComposites (uFields, uTail) (vFields, vTail)
+                    (CompositeTailOpen  , CompositeTailClosed) -> unifyOpenComposite uFlat vFlat
+                    (CompositeTailClosed, CompositeTailOpen  ) -> unifyOpenComposite vFlat uFlat
+                    (CompositeTailOpen  , CompositeTailOpen  ) -> unifyOpenComposites uFlat vFlat
 
 constraintsCheck :: UFTypeAST s tag -> Constraints tag -> TypeAST tag (UFTypeAST s) -> Infer s ()
 constraintsCheck _ TypeConstraints _ = return ()
 constraintsCheck uf old@(CompositeConstraints names) r =
     do
-        FlatComposite tail fields tailType <- flattenVal uf r
-        let fieldsSet = Map.keysSet fields
-        let forbidden = Set.intersection fieldsSet names
+        FlatComposite tail fields tailType constraints <- flattenVal uf r
+        let forbidden = Set.intersection (Map.keysSet fields) names
         unless (Set.null forbidden) $ throwError $ DuplicateFields $
             Set.toList forbidden
         case tailType of
             CompositeTailClosed -> return ()
-            CompositeTailOpen -> setConstraints tail (old `mappend` CompositeConstraints fieldsSet)
+            CompositeTailOpen -> setConstraints tail (old `mappend` constraints)
 
 setConstraints :: Monoid (Constraints tag) => UFTypeAST s tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
