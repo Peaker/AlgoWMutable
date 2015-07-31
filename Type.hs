@@ -825,19 +825,6 @@ setConstraints u constraints =
         UF.modifyDescriptor zone (tsUF u) (tastPosType . Lens._Left <>~ constraints)
             & liftST & void
 
-
-{-# INLINE union #-}
-union :: Zone s -> UF.Point a -> UF.Point a -> (a -> a -> (a, b)) -> ST s (Maybe b)
-union zone x y f =
-    do
-        ref <- newSTRef $ Nothing
-        UF.union' zone x y $ \a b ->
-            do
-                let (desc, result) = f a b
-                writeSTRef ref $ Just result
-                return desc
-        readSTRef ref
-
 unify ::
     (IsTag tag, Monoid (Constraints tag)) =>
     (TypeAST tag UFTypeAST ->
@@ -846,7 +833,7 @@ unify ::
 unify f u v =
     do
         zone <- getEnv <&> envZone
-        union zone (tsUF u) (tsUF v) g
+        UF.union' zone (tsUF u) (tsUF v) g
             & liftST
             >>= maybe (return ()) id
     where

@@ -33,6 +33,7 @@ module Data.UnionFind.ZoneRef
 where
 
 -- import Control.Applicative
+import Control.Monad (void)
 import Control.DeepSeq (NFData)
 import Control.Monad ( when )
 import Control.Monad.ST (ST)
@@ -119,24 +120,24 @@ modifyDescriptor zone point f = do
 -- distinct).  The resulting equivalence class will get the descriptor
 -- of the second argument.
 union :: Zone s -> Point a -> Point a -> ST s ()
-union zone p1 p2 = union' zone p1 p2 (\_ d2 -> return d2)
+union zone p1 p2 = void (union' zone p1 p2 (\_ d2 -> (d2, ())))
 
 -- | Like 'union', but sets the descriptor returned from the callback.
 -- 
 -- The intention is to keep the descriptor of the second argument to
 -- the callback, but the callback might adjust the information of the
 -- descriptor or perform side effects.
-union' :: Zone s -> Point a -> Point a -> (a -> a -> ST s a) -> ST s ()
+union' :: Zone s -> Point a -> Point a -> (a -> a -> (a, b)) -> ST s (Maybe b)
 union' zone p1 p2 update = do
   point1@(Pt link_ref1) <- repr zone p1
   point2@(Pt link_ref2) <- repr zone p2
   -- The precondition ensures that we don't create cyclic structures.
-  when (point1 /= point2) $ do
+  if point1 == point2 then return Nothing else do
     Info info_ref1 <- readRef zone link_ref1
     Info info_ref2 <- readRef zone link_ref2
     MkInfo w1 d1 <- readRef zone info_ref1 -- d1 is discarded
     MkInfo w2 d2 <- readRef zone info_ref2
-    d2' <- update d1 d2
+    let (d2', res) = update d1 d2
     -- Make the smaller tree a a subtree of the bigger one.  The idea
     -- is this: We increase the path length of one set by one.
     -- Assuming all elements are accessed equally often, this means
@@ -148,6 +149,7 @@ union' zone p1 p2 update = do
      else do
       writeRef zone link_ref1 (Link point2)
       writeRef zone info_ref2 (MkInfo (w1 + w2) d2')
+    return (Just res)
 
 -- | /O(1)/. Return @True@ if both points belong to the same
 -- | equivalence class.
