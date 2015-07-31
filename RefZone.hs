@@ -31,16 +31,25 @@ newtype Frozen = Frozen (V.Vector Box)
 newtype Ref a = Ref Int
     deriving (Eq)
 
-new :: ST s (Zone s)
-new = Zone <$> newSTRef 0 <*> (MV.new 1 >>= newSTRef)
+{-# INLINE initialSize #-}
+initialSize :: Int
+initialSize = 256
+{-# INLINE growthFactor #-}
+growthFactor :: Int
+growthFactor = 2
 
-freeze :: (forall s. ST s (Zone s, a)) -> (Frozen, a)
+new :: ST s (Zone s)
+new = Zone <$> newSTRef 0 <*> (MV.new initialSize >>= newSTRef)
+
+freeze :: Traversable t => (forall s. ST s (t (Zone s))) -> t Frozen
 freeze action =
-    runST $ do
-        (Zone sizeRef mvectorRef, res) <- action
-        size <- readSTRef sizeRef
-        vector <- readSTRef mvectorRef >>= V.unsafeFreeze <&> V.slice 0 size
-        return (Frozen vector, res)
+    runST $ action >>= traverse onZone
+    where
+        onZone (Zone sizeRef mvectorRef) =
+            do
+                size <- readSTRef sizeRef
+                vector <- readSTRef mvectorRef >>= V.unsafeFreeze <&> V.slice 0 size
+                Frozen vector & return
 
 clone :: Frozen -> ST s (Zone s)
 clone (Frozen vector) =
@@ -59,10 +68,10 @@ incSize (Zone sizeRef mvectorRef) =
             if size == len
             then
             do
-                doubleMvector <- MV.new (2 * len)
-                MV.copy (MV.slice 0 len doubleMvector) mvector
-                writeSTRef mvectorRef doubleMvector
-                return doubleMvector
+                grownMvector <- MV.new (growthFactor * len)
+                MV.copy (MV.slice 0 len grownMvector) mvector
+                writeSTRef mvectorRef grownMvector
+                return grownMvector
             else
                 return mvector
     where
