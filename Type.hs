@@ -874,7 +874,9 @@ unifyType =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-inferLeaf :: Leaf -> Scope s -> Infer s (UFType s)
+type InferFunc s = Scope s -> Infer s (UFType s)
+
+inferLeaf :: Leaf -> InferFunc s
 inferLeaf leaf scope =
     case leaf of
     LEmptyRecord -> wrap TEmptyComposite >>= wrap . TRecord
@@ -894,14 +896,14 @@ inferLeaf leaf scope =
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
 
-inferLam :: Abs V -> Scope s -> Infer s (UFType s)
+inferLam :: Abs V -> InferFunc s
 inferLam (Abs n body) scope =
     do
         nType <- freshTVar TypeConstraints
         resType <- infer body (insertLocal n nType scope)
         TFun nType resType & wrap
 
-inferApp :: App V -> Scope s -> Infer s (UFType s)
+inferApp :: App V -> InferFunc s
 inferApp (App fun arg) scope =
     do
         funTyp <- infer fun scope
@@ -912,7 +914,7 @@ inferApp (App fun arg) scope =
         unifyType expectedFunTyp funTyp
         return resTyp
 
-inferRecExtend :: RecExtend V -> Scope s -> Infer s (UFType s)
+inferRecExtend :: RecExtend V -> InferFunc s
 inferRecExtend (RecExtend name val rest) scope =
     do
         valTyp <- infer val scope
@@ -924,7 +926,7 @@ inferRecExtend (RecExtend name val rest) scope =
             & wrap
             >>= wrap . TRecord
 
-inferCase :: Case V -> Scope s -> Infer s (UFType s)
+inferCase :: Case V -> InferFunc s
 inferCase (Case name handler restHandler) scope =
     do
         resType <- freshTVar TypeConstraints
@@ -946,7 +948,7 @@ inferCase (Case name handler restHandler) scope =
         TCompositeExtend name fieldType sumTail
             & wrap <&> TSum >>= wrap >>= toResType
 
-inferGetField :: GetField V -> Scope s -> Infer s (UFType s)
+inferGetField :: GetField V -> InferFunc s
 inferGetField (GetField val name) scope =
     do
         resTyp <- freshTVar TypeConstraints
@@ -959,7 +961,7 @@ inferGetField (GetField val name) scope =
         unifyType expectedValTyp valTyp
         return resTyp
 
-inferInject :: Inject V -> Scope s -> Infer s (UFType s)
+inferInject :: Inject V -> InferFunc s
 inferInject (Inject name val) scope =
     do
         valTyp <- infer val scope
@@ -968,7 +970,7 @@ inferInject (Inject name val) scope =
             >>= wrap
             >>= wrap . TSum
 
-infer :: V -> Scope s -> Infer s (UFType s)
+infer :: V -> InferFunc s
 infer (V v) =
     case v of
     BLeaf x -> inferLeaf x
