@@ -77,7 +77,7 @@ import           GHC.Generics (Generic)
 import           MapPretty ()
 import           RefZone (Zone)
 import qualified RefZone as RefZone
-import           Text.PrettyPrint (isEmpty, fcat, hcat, punctuate, Doc, ($+$), (<+>), (<>), text)
+import           Text.PrettyPrint (isEmpty, fcat, vcat, hcat, punctuate, Doc, ($+$), (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           WriterT
 
@@ -1044,9 +1044,9 @@ globals =
 (<+?>) :: Doc -> Doc -> Doc
 x <+?> y = fcat [x, " ", y]
 
-test :: V -> IO ()
+test :: V -> Doc
 test x =
-    print $ pPrint x <+?>
+    pPrint x <+?>
     case inferScheme (newScope globals) x of
     Left err -> "causes type error:" <+> pPrint err
     Right (_, typ) -> " :: " <+> pPrint typ
@@ -1097,9 +1097,9 @@ example10 =
     $$ (f $$ x)
     $$ (f $$ recVal [("a", hole)])
 
-runTests :: IO ()
+runTests :: Doc
 runTests =
-    mapM_ test
+    vcat $ map test
     [ example1
     , example2
     , example3
