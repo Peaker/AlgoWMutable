@@ -874,7 +874,10 @@ unifyType =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferFunc s = Scope s -> Infer s (UFType s)
+type InferFunc s = Scope s -> Infer s (AV (UFType s), UFType s)
+
+inferRes :: Val (AV (UFType s)) -> UFType s -> (AV (UFType s), UFType s)
+inferRes val typ = (AV typ val, typ)
 
 inferLeaf :: Leaf -> InferFunc s
 inferLeaf leaf scope =
@@ -895,36 +898,39 @@ inferLeaf leaf scope =
         case lookupLocal n scope of
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
+    <&> inferRes (BLeaf leaf)
 
 inferLam :: Abs V -> InferFunc s
 inferLam (Abs n body) scope =
     do
         nType <- freshTVar TypeConstraints
-        resType <- infer body (insertLocal n nType scope)
+        (body', resType) <- infer body (insertLocal n nType scope)
         TFun nType resType & wrap
+            <&> inferRes (BLam (Abs n body'))
 
 inferApp :: App V -> InferFunc s
 inferApp (App fun arg) scope =
     do
-        funTyp <- infer fun scope
-        argTyp <- infer arg scope
+        (fun', funTyp) <- infer fun scope
+        (arg', argTyp) <- infer arg scope
         resTyp <- freshTVar TypeConstraints
 
         expectedFunTyp <- TFun argTyp resTyp & wrap
         unifyType expectedFunTyp funTyp
-        return resTyp
+        inferRes (BApp (App fun' arg')) resTyp & return
 
 inferRecExtend :: RecExtend V -> InferFunc s
 inferRecExtend (RecExtend name val rest) scope =
     do
-        valTyp <- infer val scope
-        restTyp <- infer rest scope
+        (val', valTyp) <- infer val scope
+        (rest', restTyp) <- infer rest scope
         unknownRestFields <- freshTVar $ CompositeConstraints $ Set.singleton name
         expectedResTyp <- TRecord unknownRestFields & wrap
         unifyType expectedResTyp restTyp
         TCompositeExtend name valTyp unknownRestFields
             & wrap
             >>= wrap . TRecord
+            <&> inferRes (BRecExtend (RecExtend name val' rest'))
 
 inferCase :: Case V -> InferFunc s
 inferCase (Case name handler restHandler) scope =
@@ -934,8 +940,8 @@ inferCase (Case name handler restHandler) scope =
 
         fieldType <- freshTVar TypeConstraints
 
-        handlerTyp <- infer handler scope
-        restHandlerTyp <- infer restHandler scope
+        (handler', handlerTyp) <- infer handler scope
+        (restHandler', restHandlerTyp) <- infer restHandler scope
 
         sumTail <- freshTVar $ CompositeConstraints $ Set.singleton name
 
@@ -947,28 +953,30 @@ inferCase (Case name handler restHandler) scope =
 
         TCompositeExtend name fieldType sumTail
             & wrap <&> TSum >>= wrap >>= toResType
+            <&> inferRes (BCase (Case name handler' restHandler'))
 
 inferGetField :: GetField V -> InferFunc s
 inferGetField (GetField val name) scope =
     do
         resTyp <- freshTVar TypeConstraints
-        valTyp <- infer val scope
+        (val', valTyp) <- infer val scope
         expectedValTyp <-
             freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name resTyp
             >>= wrap
             >>= wrap . TRecord
         unifyType expectedValTyp valTyp
-        return resTyp
+        inferRes (BGetField (GetField val' name)) resTyp & return
 
 inferInject :: Inject V -> InferFunc s
 inferInject (Inject name val) scope =
     do
-        valTyp <- infer val scope
+        (val', valTyp) <- infer val scope
         freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name valTyp
             >>= wrap
             >>= wrap . TSum
+            <&> inferRes (BInject (Inject name val'))
 
 infer :: V -> InferFunc s
 infer (V v) =
@@ -982,7 +990,7 @@ infer (V v) =
     BCase x -> inferCase x
 
 inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
-inferScheme scope x = runInfer $ infer x scope >>= generalize
+inferScheme scope x = runInfer $ infer x scope <&> snd >>= generalize
 
 forAll ::
     Int -> Int -> Int ->
