@@ -1,6 +1,7 @@
 {-# LANGUAGE RankNTypes, NoImplicitPrelude #-}
 module RefZone
-    ( Zone, new, freeze, clone
+    ( Zone, new
+    , Frozen, freeze, clone
     , Ref, newRef, readRef, writeRef, modifyRef
     ) where
 
