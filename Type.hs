@@ -969,15 +969,15 @@ inferInject (Inject name val) scope =
             >>= wrap . TSum
 
 infer :: V -> Scope s -> Infer s (UFType s)
-infer (V v) scope =
+infer (V v) =
     case v of
-    BLeaf l -> inferLeaf l scope
-    BLam abs -> inferLam abs scope
-    BApp app -> inferApp app scope
-    BRecExtend ext -> inferRecExtend ext scope
-    BGetField ext -> inferGetField ext scope
-    BInject ext -> inferInject ext scope
-    BCase ext -> inferCase ext scope
+    BLeaf x -> inferLeaf x
+    BLam x -> inferLam x
+    BApp x -> inferApp x
+    BRecExtend x -> inferRecExtend x
+    BGetField x -> inferGetField x
+    BInject x -> inferInject x
+    BCase x -> inferCase x
 
 inferScheme :: (forall s. Scope s) -> V -> Either Err (Scheme 'TypeT)
 inferScheme scope x = runInfer $ infer x scope >>= generalize
