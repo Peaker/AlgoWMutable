@@ -438,86 +438,6 @@ infixApp name x y = global name $$: [("l", x), ("r", y)]
 ($-) :: V -> V -> V
 ($-) = infixApp "-"
 
-data Err
-    = DoesNotUnify Doc Doc
-    | VarNotInScope Var
-    | GlobalNotInScope GlobalId
-    | InfiniteType
-    | DuplicateFields [Tag]
-    deriving (Show)
-
-intercalate :: Doc -> [Doc] -> Doc
-intercalate sep = hcat . punctuate sep
-
-instance Pretty Err where
-    pPrint (DoesNotUnify expected got) =
-        "expected:" <+> expected <+> "but got:" <+> got
-    pPrint (VarNotInScope name) =
-        pPrint name <+> "not in scope!"
-    pPrint (GlobalNotInScope name) =
-        pPrint name <+> "not in scope!"
-    pPrint InfiniteType =
-        "Infinite type encountered"
-    pPrint (DuplicateFields names) =
-        "Duplicate fields in record:" <+>
-        (intercalate ", " . map pPrint) names
-
-data Env s = Env
-    { envFresh :: STRef s Int
-    , envZone :: Zone s
-    }
-
-newtype Infer s a = Infer
-    { unInfer :: Env s -> ST s (Either Err a) }
-    deriving (Functor)
-instance Applicative (Infer s) where
-    {-# INLINE pure #-}
-    pure x = Infer $ \_ -> pure (Right x)
-    {-# INLINE (<*>) #-}
-    Infer f <*> Infer x =
-        Infer $ \s -> f s >>= \case
-        Left err -> pure (Left err)
-        Right fres -> x s >>= \case
-            Left err -> pure (Left err)
-            Right xres ->
-                pure (Right (fres xres))
-instance Monad (Infer s) where
-    {-# INLINE return #-}
-    return = pure
-    {-# INLINE (>>=) #-}
-    Infer act >>= f = Infer $ \s -> act s >>= \case
-        Left err -> pure (Left err)
-        Right x -> unInfer (f x) s
-
-runInfer :: (forall s. Infer s a) -> Either Err a
-runInfer act =
-    runST $
-    do
-        fresh <- newSTRef 0
-        zone <- RefZone.new
-        unInfer act $ Env { envFresh = fresh, envZone = zone }
-
-{-# INLINE getEnv #-}
-getEnv :: Infer s (Env s)
-getEnv = Infer $ \env -> return $ Right env
-
-{-# INLINE liftST #-}
-liftST :: ST s a -> Infer s a
-liftST act = Infer $ \_ -> act <&> Right
-
-throwError :: Err -> Infer s a
-throwError err = Infer $ \_ -> return $ Left err
-
-nextFresh :: Infer s Int
-nextFresh =
-    getEnv <&> envFresh >>= \ref ->
-    do
-        old <- readSTRef ref
-        let !new = 1 + old
-        writeSTRef ref $! new
-        return new
-    & liftST
-
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
@@ -606,18 +526,111 @@ newScope = Scope Map.empty
 emptyScope :: Scope
 emptyScope = Scope Map.empty Map.empty
 
-{-# INLINE lookupLocal #-}
-lookupLocal :: Var -> Scope -> Maybe (UFType)
-lookupLocal str (Scope locals _) = Map.lookup str locals
-
-{-# INLINE lookupGlobal #-}
-lookupGlobal :: GlobalId -> Scope -> Maybe (Scheme 'TypeT)
-lookupGlobal str (Scope _ globals) = Map.lookup str globals
-
 {-# INLINE insertLocal #-}
 insertLocal :: Var -> UFType -> Scope -> Scope
 insertLocal name typ (Scope locals globals) =
     Scope (Map.insert name typ locals) globals
+
+data Err
+    = DoesNotUnify Doc Doc
+    | VarNotInScope Var
+    | GlobalNotInScope GlobalId
+    | InfiniteType
+    | DuplicateFields [Tag]
+    deriving (Show)
+
+intercalate :: Doc -> [Doc] -> Doc
+intercalate sep = hcat . punctuate sep
+
+instance Pretty Err where
+    pPrint (DoesNotUnify expected got) =
+        "expected:" <+> expected <+> "but got:" <+> got
+    pPrint (VarNotInScope name) =
+        pPrint name <+> "not in scope!"
+    pPrint (GlobalNotInScope name) =
+        pPrint name <+> "not in scope!"
+    pPrint InfiniteType =
+        "Infinite type encountered"
+    pPrint (DuplicateFields names) =
+        "Duplicate fields in record:" <+>
+        (intercalate ", " . map pPrint) names
+
+data Env s = Env
+    { envFresh :: STRef s Int
+    , envZone :: Zone s
+    , envScope :: Scope
+    }
+
+newtype Infer s a = Infer
+    { unInfer :: Env s -> ST s (Either Err a) }
+    deriving (Functor)
+instance Applicative (Infer s) where
+    {-# INLINE pure #-}
+    pure x = Infer $ \_ -> pure (Right x)
+    {-# INLINE (<*>) #-}
+    Infer f <*> Infer x =
+        Infer $ \s -> f s >>= \case
+        Left err -> pure (Left err)
+        Right fres -> x s >>= \case
+            Left err -> pure (Left err)
+            Right xres ->
+                pure (Right (fres xres))
+instance Monad (Infer s) where
+    {-# INLINE return #-}
+    return = pure
+    {-# INLINE (>>=) #-}
+    Infer act >>= f = Infer $ \s -> act s >>= \case
+        Left err -> pure (Left err)
+        Right x -> unInfer (f x) s
+
+runInfer :: Scope -> (forall s. Infer s a) -> Either Err a
+runInfer scope act =
+    runST $
+    do
+        fresh <- newSTRef 0
+        zone <- RefZone.new
+        unInfer act $ Env { envFresh = fresh, envZone = zone, envScope = scope }
+
+{-# INLINE askEnv #-}
+askEnv :: Infer s (Env s)
+askEnv = Infer (return . Right)
+
+{-# INLINE liftST #-}
+liftST :: ST s a -> Infer s a
+liftST act = Infer $ \_ -> act <&> Right
+
+throwError :: Err -> Infer s a
+throwError err = Infer $ \_ -> return $ Left err
+
+{-# INLINE localEnv #-}
+localEnv :: (Env s -> Env s) -> Infer s a -> Infer s a
+localEnv f (Infer act) = Infer (act . f)
+
+{-# INLINE localScope #-}
+localScope :: (Scope -> Scope) -> Infer s a -> Infer s a
+localScope f = localEnv $ \e -> e { envScope = f (envScope e) }
+
+{-# INLINE askScope #-}
+askScope :: Infer s Scope
+askScope = askEnv <&> envScope
+
+{-# INLINE lookupLocal #-}
+lookupLocal :: Var -> Infer s (Maybe UFType)
+lookupLocal str = askScope <&> _scopeLocals <&> Map.lookup str
+
+{-# INLINE lookupGlobal #-}
+lookupGlobal :: GlobalId -> Infer s (Maybe (Scheme 'TypeT))
+lookupGlobal str = askScope <&> _scopeGlobals <&> Map.lookup str
+
+nextFresh :: Infer s Int
+nextFresh =
+    askEnv <&> envFresh >>= \ref ->
+    do
+        old <- readSTRef ref
+        let !new = 1 + old
+        writeSTRef ref $! new
+        return new
+    & liftST
 
 {-# INLINE freshTVarName #-}
 freshTVarName :: Infer s (TVarName tag)
@@ -630,7 +643,7 @@ newPosition ::
 newPosition t =
     do
         tvarName <- freshTVarName
-        zone <- getEnv <&> envZone
+        zone <- askEnv <&> envZone
         TypeASTPosition (Set.singleton tvarName) t
             & liftST . UF.fresh zone <&> TS
 
@@ -662,7 +675,7 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
 getWrapper :: UFTypeAST tag -> Infer s (TypeASTPosition tag)
 getWrapper (TS r) =
     do
-        zone <- getEnv <&> envZone
+        zone <- askEnv <&> envZone
         UF.descriptor zone r & liftST
 
 deref ::
@@ -821,7 +834,7 @@ constraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) innerUF
 setConstraints :: Monoid (Constraints tag) => UFTypeAST tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
     do
-        zone <- getEnv <&> envZone
+        zone <- askEnv <&> envZone
         UF.modifyDescriptor zone (tsUF u) (tastPosType . Lens._Left <>~ constraints)
             & liftST & void
 
@@ -832,7 +845,7 @@ unify ::
     UFTypeAST tag -> UFTypeAST tag -> Infer s ()
 unify f u v =
     do
-        zone <- getEnv <&> envZone
+        zone <- askEnv <&> envZone
         UF.union' zone (tsUF u) (tsUF v) g
             & liftST
             >>= maybe (return ()) id
@@ -885,13 +898,13 @@ unifyType =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferFunc s = Scope -> Infer s (AV (UFType), UFType)
+type InferResult = (AV (UFType), UFType)
 
 inferRes :: Val (AV (UFType)) -> UFType -> (AV (UFType), UFType)
 inferRes val typ = (AV typ val, typ)
 
-inferLeaf :: Leaf -> InferFunc s
-inferLeaf leaf scope =
+inferLeaf :: Leaf -> Infer s InferResult
+inferLeaf leaf =
     case leaf of
     LEmptyRecord -> wrap TEmptyComposite >>= wrap . TRecord
     LAbsurd ->
@@ -900,41 +913,41 @@ inferLeaf leaf scope =
             emptySum <- wrap TEmptyComposite >>= wrap . TSum
             TFun emptySum res & wrap
     LGlobal n ->
-        case lookupGlobal n scope of
+        lookupGlobal n >>= \case
         Just scheme -> instantiate scheme
         Nothing -> throwError $ GlobalNotInScope n
     LInt _ -> int & wrap
     LHole -> freshTVar TypeConstraints
     LVar n ->
-        case lookupLocal n scope of
+        lookupLocal n >>= \case
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
     <&> inferRes (BLeaf leaf)
 
-inferLam :: Abs V -> InferFunc s
-inferLam (Abs n body) scope =
+inferLam :: Abs V -> Infer s InferResult
+inferLam (Abs n body) =
     do
         nType <- freshTVar TypeConstraints
-        (body', resType) <- infer body (insertLocal n nType scope)
+        (body', resType) <- infer body & localScope (insertLocal n nType)
         TFun nType resType & wrap
             <&> inferRes (BLam (Abs n body'))
 
-inferApp :: App V -> InferFunc s
-inferApp (App fun arg) scope =
+inferApp :: App V -> Infer s InferResult
+inferApp (App fun arg) =
     do
-        (fun', funTyp) <- infer fun scope
-        (arg', argTyp) <- infer arg scope
+        (fun', funTyp) <- infer fun
+        (arg', argTyp) <- infer arg
         resTyp <- freshTVar TypeConstraints
 
         expectedFunTyp <- TFun argTyp resTyp & wrap
         unifyType expectedFunTyp funTyp
         inferRes (BApp (App fun' arg')) resTyp & return
 
-inferRecExtend :: RecExtend V -> InferFunc s
-inferRecExtend (RecExtend name val rest) scope =
+inferRecExtend :: RecExtend V -> Infer s InferResult
+inferRecExtend (RecExtend name val rest) =
     do
-        (val', valTyp) <- infer val scope
-        (rest', restTyp) <- infer rest scope
+        (val', valTyp) <- infer val
+        (rest', restTyp) <- infer rest
         unknownRestFields <- freshTVar $ CompositeConstraints $ Set.singleton name
         expectedResTyp <- TRecord unknownRestFields & wrap
         unifyType expectedResTyp restTyp
@@ -943,16 +956,16 @@ inferRecExtend (RecExtend name val rest) scope =
             >>= wrap . TRecord
             <&> inferRes (BRecExtend (RecExtend name val' rest'))
 
-inferCase :: Case V -> InferFunc s
-inferCase (Case name handler restHandler) scope =
+inferCase :: Case V -> Infer s InferResult
+inferCase (Case name handler restHandler) =
     do
         resType <- freshTVar TypeConstraints
         let toResType x = TFun x resType & wrap
 
         fieldType <- freshTVar TypeConstraints
 
-        (handler', handlerTyp) <- infer handler scope
-        (restHandler', restHandlerTyp) <- infer restHandler scope
+        (handler', handlerTyp) <- infer handler
+        (restHandler', restHandlerTyp) <- infer restHandler
 
         sumTail <- freshTVar $ CompositeConstraints $ Set.singleton name
 
@@ -966,11 +979,11 @@ inferCase (Case name handler restHandler) scope =
             & wrap <&> TSum >>= wrap >>= toResType
             <&> inferRes (BCase (Case name handler' restHandler'))
 
-inferGetField :: GetField V -> InferFunc s
-inferGetField (GetField val name) scope =
+inferGetField :: GetField V -> Infer s InferResult
+inferGetField (GetField val name) =
     do
         resTyp <- freshTVar TypeConstraints
-        (val', valTyp) <- infer val scope
+        (val', valTyp) <- infer val
         expectedValTyp <-
             freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name resTyp
@@ -979,17 +992,17 @@ inferGetField (GetField val name) scope =
         unifyType expectedValTyp valTyp
         inferRes (BGetField (GetField val' name)) resTyp & return
 
-inferInject :: Inject V -> InferFunc s
-inferInject (Inject name val) scope =
+inferInject :: Inject V -> Infer s InferResult
+inferInject (Inject name val) =
     do
-        (val', valTyp) <- infer val scope
+        (val', valTyp) <- infer val
         freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name valTyp
             >>= wrap
             >>= wrap . TSum
             <&> inferRes (BInject (Inject name val'))
 
-infer :: V -> InferFunc s
+infer :: V -> Infer s InferResult
 infer (V v) =
     case v of
     BLeaf x -> inferLeaf x
@@ -1001,7 +1014,7 @@ infer (V v) =
     BCase x -> inferCase x
 
 inferScheme :: Scope -> V -> Either Err (AV UFType, Scheme 'TypeT)
-inferScheme scope x = runInfer $ infer x scope >>= _2 %%~ generalize
+inferScheme scope x = runInfer scope $ infer x >>= _2 %%~ generalize
 
 forAll ::
     Int -> Int -> Int ->
