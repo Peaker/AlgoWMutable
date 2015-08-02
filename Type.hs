@@ -462,7 +462,7 @@ data TypeASTPosition tag = TypeASTPosition
 
 type UFType = UFTypeAST 'TypeT
 type UFComposite c s = UFTypeAST ('CompositeT c)
-newtype UFTypeAST tag = TS { tsUF :: UF.Point (TypeASTPosition tag) }
+newtype UFTypeAST tag = UFTypeAST { tsUF :: UF.Point (TypeASTPosition tag) }
     deriving (NFData)
 instance Pretty (UFTypeAST tag) where pPrint _ = ".."
 
@@ -644,7 +644,7 @@ newPosition t =
         tvarName <- freshTVarName
         zone <- askEnv <&> envZone
         TypeASTPosition (Set.singleton tvarName) t
-            & liftST . UF.fresh zone <&> TS
+            & liftST . UF.fresh zone <&> UFTypeAST
 
 {-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (UFTypeAST tag)
@@ -672,7 +672,7 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
         go typ
 
 getWrapper :: UFTypeAST tag -> Infer s (TypeASTPosition tag)
-getWrapper (TS r) =
+getWrapper (UFTypeAST r) =
     do
         zone <- askEnv <&> envZone
         UF.descriptor zone r & liftST
