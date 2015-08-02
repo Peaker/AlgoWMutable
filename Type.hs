@@ -90,12 +90,12 @@ type SumT = 'CompositeT 'SumC
 data ASTTag = TypeT | CompositeT CompositeTag
 
 data CompositeTagEquality c
-    = IsRecordC (c :~: 'RecordC)
-    | IsSumC (c :~: 'SumC)
+    = IsRecordC !(c :~: 'RecordC)
+    | IsSumC !(c :~: 'SumC)
 
 data ASTTagEquality t where
-    IsTypeT :: (t :~: 'TypeT) -> ASTTagEquality t
-    IsCompositeT :: CompositeTagEquality c -> (t :~: 'CompositeT c) -> ASTTagEquality t
+    IsTypeT :: !(t :~: 'TypeT) -> ASTTagEquality t
+    IsCompositeT :: !(CompositeTagEquality c) -> !(t :~: 'CompositeT c) -> ASTTagEquality t
 
 class IsCompositeTag t where
     compositeTagRefl :: CompositeTagEquality t
@@ -136,14 +136,13 @@ newtype TParamId = TParamId { _tParamId :: Identifier }
 
 data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
-    TInst :: TId -> !(Map TParamId (ast 'TypeT)) -> TypeAST 'TypeT ast
+    TInst :: {-# UNPACK #-}!TId -> !(Map TParamId (ast 'TypeT)) -> TypeAST 'TypeT ast
     TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
     TSum :: !(ast SumT) -> Type ast
     TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
     TCompositeExtend ::
-        IsCompositeTag c => Tag -> !(ast 'TypeT) ->
-        !(ast ('CompositeT c)) ->
-        TypeAST ('CompositeT c) ast
+        IsCompositeTag c => {-# UNPACK #-}!Tag -> !(ast 'TypeT) ->
+        !(ast ('CompositeT c)) -> TypeAST ('CompositeT c) ast
 
 type Type = TypeAST 'TypeT
 type Record = TypeAST RecordT
