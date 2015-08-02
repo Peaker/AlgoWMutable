@@ -516,7 +516,7 @@ instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
         | otherwise = pPrint binders <> "." <+> pPrint typ
 
 data Scope = Scope
-    { _scopeLocals :: Map Var (UFType)
+    { _scopeLocals :: Map Var UFType
     , _scopeGlobals :: Map GlobalId (Scheme 'TypeT)
     }
 
@@ -714,7 +714,7 @@ unifyMatch expected vTyp prism =
     Just vcontent -> return vcontent
 
 data CompositeTailType = CompositeTailOpen | CompositeTailClosed
-type CompositeFields s = Map Tag (UFType)
+type CompositeFields s = Map Tag UFType
 
 data FlatComposite c s = FlatComposite
     { __fcTailUF :: UFComposite c s
@@ -859,7 +859,7 @@ unify f u v =
             & _1 %~ TypeASTPosition (uNames `mappend` vNames)
 
 unifyTInstParams ::
-    Err -> Map TParamId (UFType) -> Map TParamId (UFType) -> Infer s ()
+    Err -> Map TParamId UFType -> Map TParamId UFType -> Infer s ()
 unifyTInstParams err uParams vParams
     | uSize /= vSize = throwError err
     | uSize == 0 = return ()
@@ -898,9 +898,9 @@ unifyType =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferResult = (AV (UFType), UFType)
+type InferResult = (AV UFType, UFType)
 
-inferRes :: Val (AV (UFType)) -> UFType -> (AV (UFType), UFType)
+inferRes :: Val (AV UFType) -> UFType -> (AV UFType, UFType)
 inferRes val typ = (AV typ val, typ)
 
 inferLeaf :: Leaf -> Infer s InferResult
