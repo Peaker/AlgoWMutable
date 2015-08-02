@@ -457,21 +457,21 @@ instance Monoid (Constraints ('CompositeT c)) where
 
 data UnificationTV tag
     = Unbound (Constraints tag)
-    | Bound (TypeAST tag UFTypeAST)
+    | Bound (TypeAST tag TypeASTRef)
 
-data TypeASTPosition tag = TypeASTPosition
+data UnificationPos tag = UnificationPos
     { __tastPosNames :: Set (TVarName tag)
     , _tastPosType :: UnificationTV tag
     }
 
-type UFType = UFTypeAST 'TypeT
-type UFComposite c s = UFTypeAST ('CompositeT c)
-newtype UFTypeAST tag = UFTypeAST { tsUF :: UF.Point (TypeASTPosition tag) }
+type TypeRef = TypeASTRef 'TypeT
+type CompositeRef c s = TypeASTRef ('CompositeT c)
+newtype TypeASTRef tag = TypeASTRef { tsUF :: UF.Point (UnificationPos tag) }
     deriving (NFData)
-instance Pretty (UFTypeAST tag) where pPrint _ = ".."
+instance Pretty (TypeASTRef tag) where pPrint _ = ".."
 
 Lens.makePrisms ''UnificationTV
-Lens.makeLenses ''TypeASTPosition
+Lens.makeLenses ''UnificationPos
 
 type TVarBinders tag = Map (TVarName tag) (Constraints tag)
 
@@ -520,7 +520,7 @@ instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
         | otherwise = pPrint binders <> "." <+> pPrint typ
 
 data Scope = Scope
-    { _scopeLocals :: Map Var UFType
+    { _scopeLocals :: Map Var TypeRef
     , _scopeGlobals :: Map GlobalId (Scheme 'TypeT)
     }
 
@@ -531,7 +531,7 @@ emptyScope :: Scope
 emptyScope = Scope Map.empty Map.empty
 
 {-# INLINE insertLocal #-}
-insertLocal :: Var -> UFType -> Scope -> Scope
+insertLocal :: Var -> TypeRef -> Scope -> Scope
 insertLocal name typ (Scope locals globals) =
     Scope (Map.insert name typ locals) globals
 
@@ -619,7 +619,7 @@ askScope :: Infer s Scope
 askScope = askEnv <&> envScope
 
 {-# INLINE lookupLocal #-}
-lookupLocal :: Var -> Infer s (Maybe UFType)
+lookupLocal :: Var -> Infer s (Maybe TypeRef)
 lookupLocal str = askScope <&> _scopeLocals <&> Map.lookup str
 
 {-# INLINE lookupGlobal #-}
@@ -641,41 +641,41 @@ freshTVarName :: Infer s (TVarName tag)
 freshTVarName = nextFresh <&> TVarName
 
 {-# INLINE newPosition #-}
-newPosition :: UnificationTV tag -> Infer s (UFTypeAST tag)
+newPosition :: UnificationTV tag -> Infer s (TypeASTRef tag)
 newPosition t =
     do
         tvarName <- freshTVarName
         zone <- askEnv <&> envZone
-        TypeASTPosition (Set.singleton tvarName) t
-            & liftST . UF.fresh zone <&> UFTypeAST
+        UnificationPos (Set.singleton tvarName) t
+            & liftST . UF.fresh zone <&> TypeASTRef
 
 {-# INLINE freshTVar #-}
-freshTVar :: Constraints tag -> Infer s (UFTypeAST tag)
+freshTVar :: Constraints tag -> Infer s (TypeASTRef tag)
 freshTVar = newPosition . Unbound
 
 {-# INLINE wrap #-}
-wrap :: TypeAST tag UFTypeAST -> Infer s (UFTypeAST tag)
+wrap :: TypeAST tag TypeASTRef -> Infer s (TypeASTRef tag)
 wrap = newPosition . Bound
 
-instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (UFTypeAST tag)
+instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (TypeASTRef tag)
 instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
     do
         typeUFs <- traverse freshTVar typeVars
         recordUFs <- traverse freshTVar recordVars
         sumUFs <- traverse freshTVar sumVars
-        let lookupTVar :: forall t. IsTag t => TVarName t -> UFTypeAST t
+        let lookupTVar :: forall t. IsTag t => TVarName t -> TypeASTRef t
             lookupTVar tvar =
                 case tagRefl :: ASTTagEquality t of
                 IsTypeT Refl -> typeUFs Map.! tvar
                 IsCompositeT (IsRecordC Refl) Refl -> recordUFs Map.! tvar
                 IsCompositeT (IsSumC Refl) Refl -> sumUFs Map.! tvar
-        let go :: forall t. IsTag t => T t -> Infer s (UFTypeAST t)
+        let go :: forall t. IsTag t => T t -> Infer s (TypeASTRef t)
             go (TVar tvarName) = return (lookupTVar tvarName)
             go (T typeAST) = typeSubexprs go typeAST >>= wrap
         go typ
 
-getWrapper :: UFTypeAST tag -> Infer s (TypeASTPosition tag)
-getWrapper (UFTypeAST r) =
+getWrapper :: TypeASTRef tag -> Infer s (UnificationPos tag)
+getWrapper (TypeASTRef r) =
     do
         zone <- askEnv <&> envZone
         UF.descriptor zone r & liftST
@@ -683,9 +683,9 @@ getWrapper (UFTypeAST r) =
 deref ::
     forall s tag. IsTag tag =>
     Set Int ->
-    UFTypeAST tag -> WriterT SchemeBinders (Infer s) (T tag)
+    TypeASTRef tag -> WriterT SchemeBinders (Infer s) (T tag)
 deref visited ts =
-    lift (getWrapper ts) >>= \(TypeASTPosition names typ) ->
+    lift (getWrapper ts) >>= \(UnificationPos names typ) ->
     let tvName = Set.findMin names
     in if _tVarName tvName `Set.member` visited
     then throwError InfiniteType & lift
@@ -703,7 +703,7 @@ deref visited ts =
             binders = Map.singleton tvName cs
     Bound t -> t & typeSubexprs (deref (Set.insert (_tVarName tvName) visited)) <&> T
 
-generalize :: UFType -> Infer s (Scheme 'TypeT)
+generalize :: TypeRef -> Infer s (Scheme 'TypeT)
 generalize t =
     deref Set.empty t
     & runWriterT
@@ -716,10 +716,10 @@ unifyMatch expected vTyp prism =
     Just vcontent -> return vcontent
 
 data CompositeTailType = CompositeTailOpen | CompositeTailClosed
-type CompositeFields s = Map Tag UFType
+type CompositeFields s = Map Tag TypeRef
 
 data FlatComposite c s = FlatComposite
-    { __fcTailUF :: UFComposite c s
+    { __fcTailUF :: CompositeRef c s
     , _fcFields :: CompositeFields s
     , __fcTailType :: CompositeTailType
     , __fcTailConstraints :: Constraints ('CompositeT c)
@@ -727,7 +727,7 @@ data FlatComposite c s = FlatComposite
 
 Lens.makeLenses ''FlatComposite
 
-flattenVal :: UFComposite c s -> Composite c UFTypeAST -> Infer s (FlatComposite c s)
+flattenVal :: CompositeRef c s -> Composite c TypeASTRef -> Infer s (FlatComposite c s)
 flattenVal uf TEmptyComposite = return $ FlatComposite uf Map.empty CompositeTailClosed mempty
 flattenVal _ (TCompositeExtend n t r) =
     flatten r <&> fcFields . Lens.at n ?~ t
@@ -738,7 +738,7 @@ flattenVal _ (TCompositeExtend n t r) =
             Bound typ -> flattenVal ts typ
 
 unflatten ::
-    IsCompositeTag c => UFComposite c s -> CompositeFields s -> Infer s (UFComposite c s)
+    IsCompositeTag c => CompositeRef c s -> CompositeFields s -> Infer s (CompositeRef c s)
 unflatten tail fields =
     Map.toList fields & go
     where
@@ -794,7 +794,7 @@ unifyOpenComposites u v =
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
-unifyComposite :: IsCompositeTag c => UFComposite c s -> UFComposite c s -> Infer s ()
+unifyComposite :: IsCompositeTag c => CompositeRef c s -> CompositeRef c s -> Infer s ()
 unifyComposite uUf vUf =
     unify f uUf vUf
     where
@@ -819,7 +819,7 @@ unifyComposite uUf vUf =
                     (CompositeTailOpen  , CompositeTailOpen  ) -> unifyOpenComposites uFlat vFlat
 
 constraintsCheck ::
-    Constraints tag -> UFTypeAST tag -> TypeAST tag UFTypeAST -> Infer s ()
+    Constraints tag -> TypeASTRef tag -> TypeAST tag TypeASTRef -> Infer s ()
 constraintsCheck TypeConstraints _ _ = return ()
 constraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) innerUF inner =
     do
@@ -833,7 +833,7 @@ constraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) innerUF
             CompositeTailOpen ->
                 setConstraints innerTail (outerConstraints `mappend` innerConstraints)
 
-setConstraints :: Monoid (Constraints tag) => UFTypeAST tag -> Constraints tag -> Infer s ()
+setConstraints :: Monoid (Constraints tag) => TypeASTRef tag -> Constraints tag -> Infer s ()
 setConstraints u constraints =
     do
         zone <- askEnv <&> envZone
@@ -842,9 +842,9 @@ setConstraints u constraints =
 
 unify ::
     (IsTag tag, Monoid (Constraints tag)) =>
-    (TypeAST tag UFTypeAST ->
-     TypeAST tag UFTypeAST -> Infer s ()) ->
-    UFTypeAST tag -> UFTypeAST tag -> Infer s ()
+    (TypeAST tag TypeASTRef ->
+     TypeAST tag TypeASTRef -> Infer s ()) ->
+    TypeASTRef tag -> TypeASTRef tag -> Infer s ()
 unify f u v =
     do
         zone <- askEnv <&> envZone
@@ -852,16 +852,16 @@ unify f u v =
             & liftST
             >>= maybe (return ()) id
     where
-        g (TypeASTPosition uNames uMTyp) (TypeASTPosition vNames vMTyp) =
+        g (UnificationPos uNames uMTyp) (UnificationPos vNames vMTyp) =
             case (uMTyp, vMTyp) of
             (Unbound uCs, Unbound vCs) -> (Unbound (uCs `mappend` vCs), return ())
             (Unbound uCs, Bound y) -> (Bound y, constraintsCheck uCs v y)
             (Bound x, Unbound vCs) -> (Bound x, constraintsCheck vCs u x)
             (Bound x, Bound y) -> (Bound x, f x y)
-            & _1 %~ TypeASTPosition (uNames `mappend` vNames)
+            & _1 %~ UnificationPos (uNames `mappend` vNames)
 
 unifyTInstParams ::
-    Err -> Map TParamId UFType -> Map TParamId UFType -> Infer s ()
+    Err -> Map TParamId TypeRef -> Map TParamId TypeRef -> Infer s ()
 unifyTInstParams err uParams vParams
     | uSize /= vSize = throwError err
     | uSize == 0 = return ()
@@ -872,7 +872,7 @@ unifyTInstParams err uParams vParams
         vSize = Map.size vParams
         unifyParam (_, uParam) (_, vParam) = unifyType uParam vParam
 
-unifyType :: UFType -> UFType -> Infer s ()
+unifyType :: TypeRef -> TypeRef -> Infer s ()
 unifyType =
     unify f
     where
@@ -900,9 +900,9 @@ unifyType =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferResult = (AV UFType, UFType)
+type InferResult = (AV TypeRef, TypeRef)
 
-inferRes :: Val (AV UFType) -> UFType -> (AV UFType, UFType)
+inferRes :: Val (AV TypeRef) -> TypeRef -> (AV TypeRef, TypeRef)
 inferRes val typ = (AV typ val, typ)
 
 inferLeaf :: Leaf -> Infer s InferResult
@@ -1015,7 +1015,7 @@ infer (V v) =
     BInject x -> inferInject x
     BCase x -> inferCase x
 
-inferScheme :: Scope -> V -> Either Err (AV UFType, Scheme 'TypeT)
+inferScheme :: Scope -> V -> Either Err (AV TypeRef, Scheme 'TypeT)
 inferScheme scope x = runInfer scope $ infer x >>= _2 %%~ generalize
 
 forAll ::
