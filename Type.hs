@@ -465,7 +465,7 @@ data UnificationPos tag = UnificationPos
     }
 
 type TypeRef = TypeASTRef 'TypeT
-type CompositeRef c s = TypeASTRef ('CompositeT c)
+type CompositeRef c = TypeASTRef ('CompositeT c)
 newtype TypeASTRef tag = TypeASTRef { tsUF :: UF.Point (UnificationPos tag) }
     deriving (NFData)
 instance Pretty (TypeASTRef tag) where pPrint _ = ".."
@@ -716,18 +716,18 @@ unifyMatch expected vTyp prism =
     Just vcontent -> return vcontent
 
 data CompositeTailType = CompositeTailOpen | CompositeTailClosed
-type CompositeFields s = Map Tag TypeRef
+type CompositeFields = Map Tag TypeRef
 
-data FlatComposite c s = FlatComposite
-    { __fcTailUF :: CompositeRef c s
-    , _fcFields :: CompositeFields s
+data FlatComposite c = FlatComposite
+    { __fcTailUF :: CompositeRef c
+    , _fcFields :: CompositeFields
     , __fcTailType :: CompositeTailType
     , __fcTailConstraints :: Constraints ('CompositeT c)
     }
 
 Lens.makeLenses ''FlatComposite
 
-flattenVal :: CompositeRef c s -> Composite c TypeASTRef -> Infer s (FlatComposite c s)
+flattenVal :: CompositeRef c -> Composite c TypeASTRef -> Infer s (FlatComposite c)
 flattenVal uf TEmptyComposite = return $ FlatComposite uf Map.empty CompositeTailClosed mempty
 flattenVal _ (TCompositeExtend n t r) =
     flatten r <&> fcFields . Lens.at n ?~ t
@@ -738,7 +738,7 @@ flattenVal _ (TCompositeExtend n t r) =
             Bound typ -> flattenVal ts typ
 
 unflatten ::
-    IsCompositeTag c => CompositeRef c s -> CompositeFields s -> Infer s (CompositeRef c s)
+    IsCompositeTag c => CompositeRef c -> CompositeFields -> Infer s (CompositeRef c)
 unflatten tail fields =
     Map.toList fields & go
     where
@@ -749,7 +749,7 @@ prettyFieldNames :: Map Tag a -> Doc
 prettyFieldNames = intercalate " " . map pPrint . Map.keys
 
 {-# INLINE unifyClosedComposites #-}
-unifyClosedComposites :: CompositeFields s -> CompositeFields s -> Infer s ()
+unifyClosedComposites :: CompositeFields -> CompositeFields -> Infer s ()
 unifyClosedComposites uFields vFields
     | Map.keysSet uFields == Map.keysSet vFields = return ()
     | otherwise =
@@ -760,7 +760,7 @@ unifyClosedComposites uFields vFields
 
 {-# INLINE unifyOpenComposite #-}
 unifyOpenComposite ::
-    IsCompositeTag c => FlatComposite c s -> FlatComposite c s -> Infer s ()
+    IsCompositeTag c => FlatComposite c -> FlatComposite c -> Infer s ()
 unifyOpenComposite uOpen vClosed
     | Map.null uniqueUFields =
           do
@@ -780,7 +780,7 @@ unifyOpenComposite uOpen vClosed
 
 {-# INLINE unifyOpenComposites #-}
 unifyOpenComposites ::
-    IsCompositeTag c => FlatComposite c s -> FlatComposite c s -> Infer s ()
+    IsCompositeTag c => FlatComposite c -> FlatComposite c -> Infer s ()
 unifyOpenComposites u v =
     do
         commonRest <- freshTVar $ uConstraints `mappend` vConstraints
@@ -794,7 +794,7 @@ unifyOpenComposites u v =
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
-unifyComposite :: IsCompositeTag c => CompositeRef c s -> CompositeRef c s -> Infer s ()
+unifyComposite :: IsCompositeTag c => CompositeRef c -> CompositeRef c -> Infer s ()
 unifyComposite uUf vUf =
     unify f uUf vUf
     where
