@@ -88,28 +88,28 @@ newRef :: Zone s -> a -> ST s (Ref a)
 newRef zone val =
     do
         (mvector, size) <- incSize zone
-        val & toBox & MV.write mvector size
+        val & toBox & MV.unsafeWrite mvector size
         Ref size & return
 
 {-# INLINE readRef #-}
 readRef :: Zone s -> Ref a -> ST s a
 readRef zone (Ref i) =
-    readSTRef (zoneVectorRef zone) >>= (MV.read ?? i) <&> unsafeFromBox
+    readSTRef (zoneVectorRef zone) >>= (MV.unsafeRead ?? i) <&> unsafeFromBox
 
 {-# INLINE writeRef #-}
 writeRef :: Zone s -> Ref a -> a -> ST s ()
 writeRef zone (Ref i) val =
     do
         mvector <- readSTRef (zoneVectorRef zone)
-        toBox val & MV.write mvector i
+        toBox val & MV.unsafeWrite mvector i
 
 {-# INLINE modifyRef #-}
 modifyRef :: Zone s -> Ref a -> (a -> a) -> ST s ()
 modifyRef zone (Ref i) f =
     do
         mvector <- readSTRef (zoneVectorRef zone)
-        MV.read mvector i
+        MV.unsafeRead mvector i
             <&> unsafeFromBox
             <&> f
             <&> toBox
-            >>= MV.write mvector i
+            >>= MV.unsafeWrite mvector i
