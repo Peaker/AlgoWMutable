@@ -72,6 +72,7 @@ import           Data.String (IsString)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Type.Equality ((:~:)(..))
+import           GHC.Exts (inline)
 import           GHC.Generics (Generic)
 import           MapPretty ()
 import           RefZone (Zone)
@@ -1137,7 +1138,7 @@ infer (V v) =
 inferScheme :: Scope -> V -> Either Err (AV UnifiableType, Scheme 'TypeT)
 inferScheme scope x =
     {-# SCC "inferScheme" #-}
-    runInfer scope $ infer x >>= _2 %%~ generalize
+    runInfer scope $ infer x >>= inline _2 generalize
 
 forAll ::
     Int -> Int -> Int ->
