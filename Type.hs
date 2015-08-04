@@ -217,10 +217,16 @@ instance (Pretty (ast 'TypeT), Pretty (ast RecordT), Pretty (ast SumT)) => Prett
         case ast of
         TFun a b ->
             maybeParens (prec > 0) $
-            pPrintPrec level 1 a <+> "->" <+> pPrintPrec level 0 b
-        TInst name params -> "#" <> pPrint name <+> pPrint params
+            pPrintPrec level 1 a <+> "->" <+?> pPrintPrec level 0 b
+        TInst name params
+            | Map.null params -> pPrint name
+            | otherwise -> pPrint name <+> pPrint params
         TRecord r -> pPrintPrec level prec r
         TSum s -> pPrintPrec level prec s
+
+infixr 2 <+?>
+(<+?>) :: Doc -> Doc -> Doc
+x <+?> y = fcat [x, " " <> y]
 
 instance (IsCompositeTag c, Pretty (ast 'TypeT), Pretty (ast ('CompositeT c))) => Pretty (Composite c ast) where
     pPrintPrec level prec ast =
@@ -228,7 +234,7 @@ instance (IsCompositeTag c, Pretty (ast 'TypeT), Pretty (ast ('CompositeT c))) =
         TEmptyComposite -> "{}"
         TCompositeExtend n t r ->
             maybeParens (prec > 1) $
-            "{" <+> pPrint n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+>
+            "{" <+> pPrint n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+?>
             text [compositeChar (Proxy :: Proxy c)] <+> pPrintPrec level 1 r
 
 
@@ -310,7 +316,7 @@ instance Pretty v => Pretty (Val v) where
         maybeParens (prec > 7) $
         "{" <> pPrint name <> "="
         <> pPrintPrec level 8 val <+> "} *"
-        <+> pPrintPrec level 7 rest
+        <+?> pPrintPrec level 7 rest
     pPrintPrec level prec (BCase (Case name handler restHandler)) =
         maybeParens (prec > 7) $
         pPrint name <> "->"
@@ -527,7 +533,7 @@ instance Pretty SchemeBinders where
 instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
     pPrint (Scheme binders typ)
         | nullBinders binders = pPrint typ
-        | otherwise = pPrint binders <> "." <+> pPrint typ
+        | otherwise = pPrint binders <> "." <+?> pPrint typ
 
 data Scope = Scope
     { _scopeLocals :: Map Var UnifiableType
@@ -1132,9 +1138,6 @@ globals =
     where
         intInfix = forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
         (==>) = Map.singleton
-
-(<+?>) :: Doc -> Doc -> Doc
-x <+?> y = fcat [x, " ", y]
 
 test :: V -> Doc
 test x =
