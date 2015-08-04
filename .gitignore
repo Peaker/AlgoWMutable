@@ -2,6 +2,15 @@
 *.dyn_o
 *.i_hi
 *.i_o
+*.p_hi
+*.p_o
+*.O1_hi
+*.O1_o
+*.O2_hi
+*.O2_o
 *.hi
 *.o
 benchmark
+benchmark.p
+benchmark.O1
+benchmark.O2
