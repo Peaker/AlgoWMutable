@@ -692,17 +692,17 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
         typeUFs <- {-# SCC "instantiate.freshtvs" #-}traverse freshTVar typeVars
         recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshTVar recordVars
         sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshTVar sumVars
-        let lookupTVar :: forall t. IsTag t => TVarName t -> UnifiableTypeAST t
-            lookupTVar tvar =
-                {-# SCC "instantiate.lookupTVar" #-}
-                case tagRefl :: ASTTagEquality t of
-                IsTypeT Refl -> typeUFs Map.! tvar
-                IsCompositeT (IsRecordC Refl) Refl -> recordUFs Map.! tvar
-                IsCompositeT (IsSumC Refl) Refl -> sumUFs Map.! tvar
-        let go :: forall t. IsTag t => T t -> Infer s (UnifiableTypeAST t)
-            go (TVar tvarName) = return (lookupTVar tvarName)
-            go (T typeAST) = typeSubexprs go typeAST <&> UnifiableTypeAST
-        {-# SCC "instantiate.go" #-}go typ
+        let go ::
+                Map (TVarName t) (UnifiableTypeAST t) ->
+                T t -> Infer s (UnifiableTypeAST t)
+            go binders (TVar tvarName) = return (binders Map.! tvarName)
+            go _ (T typeAST) =
+                ntraverse (go typeUFs) (go recordUFs) (go sumUFs) typeAST
+                <&> UnifiableTypeAST
+        {-# SCC "instantiate.go" #-}typ & case tagRefl :: ASTTagEquality tag of
+            IsTypeT Refl -> go typeUFs
+            IsCompositeT (IsRecordC Refl) Refl -> go recordUFs
+            IsCompositeT (IsSumC Refl) Refl -> go sumUFs
 
 repr ::
     UnificationPos tag ->
