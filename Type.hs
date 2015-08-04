@@ -3,7 +3,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -73,7 +72,6 @@ import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Type.Equality ((:~:)(..))
 import           GHC.Exts (inline)
-import           GHC.Generics (Generic)
 import           MapPretty ()
 import           RefZone (Zone)
 import qualified RefZone as RefZone
@@ -352,8 +350,9 @@ instance NFData a => NFData (AV a) where
 data T tag
     = T (TypeAST tag T)
     | TVar (TVarName tag)
-    deriving (Generic)
-instance NFData (T tag)
+instance NFData (T tag) where
+    rnf (T x) = rnf x
+    rnf (TVar x) = rnf x
 
 instance Pretty (TypeAST tag T) => Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
@@ -496,8 +495,9 @@ data SchemeBinders = SchemeBinders
     { schemeTypeBinders :: TVarBinders 'TypeT
     , schemeRecordBinders :: TVarBinders RecordT
     , schemeSumBinders :: TVarBinders SumT
-    } deriving (Generic)
-instance NFData SchemeBinders
+    }
+instance NFData SchemeBinders where
+    rnf (SchemeBinders x y z) = rnf x `seq` rnf y `seq` rnf z
 instance Monoid SchemeBinders where
     mempty = SchemeBinders Map.empty Map.empty Map.empty
     mappend (SchemeBinders t0 r0 s0) (SchemeBinders t1 r1 s1) =
@@ -512,8 +512,9 @@ nullBinders (SchemeBinders a b c) = Map.null a && Map.null b && Map.null c
 data Scheme tag = Scheme
     { schemeBinders :: SchemeBinders
     , schemeType :: T tag
-    } deriving (Generic)
-instance NFData (Scheme tag)
+    }
+instance NFData (Scheme tag) where
+    rnf (Scheme x y) = rnf x `seq` rnf y
 
 pPrintTV :: (TVarName tag, Constraints tag) -> Doc
 pPrintTV (tv, constraints) =
