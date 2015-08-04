@@ -53,7 +53,6 @@ module Type
 
 import           Prelude.Compat hiding (abs, tail)
 
-import           Data.String (IsString)
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
@@ -69,6 +68,7 @@ import           Data.Proxy (Proxy(..))
 import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
+import           Data.String (IsString)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Type.Equality ((:~:)(..))
@@ -687,12 +687,14 @@ freshTVar cs = freshPos cs <&> UnifiableTypeVar
 
 instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (UnifiableTypeAST tag)
 instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
+    {-# SCC "instantiate" #-}
     do
-        typeUFs <- traverse freshTVar typeVars
-        recordUFs <- traverse freshTVar recordVars
-        sumUFs <- traverse freshTVar sumVars
+        typeUFs <- {-# SCC "instantiate.freshtvs" #-}traverse freshTVar typeVars
+        recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshTVar recordVars
+        sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshTVar sumVars
         let lookupTVar :: forall t. IsTag t => TVarName t -> UnifiableTypeAST t
             lookupTVar tvar =
+                {-# SCC "instantiate.lookupTVar" #-}
                 case tagRefl :: ASTTagEquality t of
                 IsTypeT Refl -> typeUFs Map.! tvar
                 IsCompositeT (IsRecordC Refl) Refl -> recordUFs Map.! tvar
@@ -700,7 +702,7 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
         let go :: forall t. IsTag t => T t -> Infer s (UnifiableTypeAST t)
             go (TVar tvarName) = return (lookupTVar tvarName)
             go (T typeAST) = typeSubexprs go typeAST <&> UnifiableTypeAST
-        go typ
+        {-# SCC "instantiate.go" #-}go typ
 
 repr ::
     UnificationPos tag ->
@@ -749,6 +751,7 @@ deref visited = \case
 
 generalize :: UnifiableType -> Infer s (Scheme 'TypeT)
 generalize t =
+    {-# SCC "generalize" #-}
     deref Set.empty t
     & runWriterT
     <&> uncurry (flip Scheme)
@@ -786,7 +789,7 @@ flattenVal (TCompositeExtend n t r) =
 
 unflatten :: IsCompositeTag c => FlatComposite c -> UnifiableComposite c
 unflatten (FlatComposite fields tail) =
-    Map.toList fields & go
+    {-# SCC "unflatten" #-}Map.toList fields & go
     where
         go [] = case tail of
             CompositeTailClosed -> UnifiableTypeAST TEmptyComposite
@@ -824,7 +827,7 @@ constraintsCheck ::
     Constraints tag -> TypeAST tag UnifiableTypeAST -> Infer s ()
 constraintsCheck TypeConstraints _ = return ()
 constraintsCheck cs@CompositeConstraints{} inner =
-    flattenVal inner >>= flatConstraintsCheck cs
+    ({-# SCC "constraintsCheck.flatten" #-}flattenVal inner) >>= flatConstraintsCheck cs
 
 writeCompositeTail ::
     IsCompositeTag c =>
@@ -832,7 +835,7 @@ writeCompositeTail ::
     FlatComposite c -> Infer s ()
 writeCompositeTail (pos, cs) composite =
     do
-        flatConstraintsCheck cs composite
+        {-# SCC "flatConstraintsCheck" #-}flatConstraintsCheck cs composite
         writeRef (__unificationPosRef pos) $ Bound $ unflatten composite
 
 {-# INLINE unifyOpenComposite #-}
@@ -874,7 +877,7 @@ unifyOpenComposites (uPos, uCs, uFields) (vPos, vCs, vFields) =
 unifyComposite ::
     IsCompositeTag c => UnifiableComposite c -> UnifiableComposite c ->
     Infer s ()
-unifyComposite = unify unifyCompositeAST
+unifyComposite = {-# SCC "unifyComposite" #-}unify unifyCompositeAST
 
 -- We already know we are record vals, and will re-read them
 -- via flatten, so no need for unify's read of these:
@@ -891,14 +894,17 @@ unifyCompositeAST (TCompositeExtend un ut ur) (TCompositeExtend vn vt vr)
             unifyComposite ur vr
 unifyCompositeAST u v =
     do
-        FlatComposite uFields uTail <- flattenVal u
-        FlatComposite vFields vTail <- flattenVal v
+        FlatComposite uFields uTail <- {-# SCC "unifyCompositeAST.flatten(u)" #-}flattenVal u
+        FlatComposite vFields vTail <- {-# SCC "unifyCompositeAST.flatten(v)" #-}flattenVal v
         case (uTail, vTail) of
-            (CompositeTailClosed, CompositeTailClosed) -> unifyClosedComposites uFields vFields
-            (CompositeTailOpen uPos uCs, CompositeTailClosed) -> unifyOpenComposite (uPos, uCs, uFields) vFields
-            (CompositeTailClosed, CompositeTailOpen vPos vCs) -> unifyOpenComposite (vPos, vCs, vFields) uFields
+            (CompositeTailClosed, CompositeTailClosed) ->
+                {-# SCC "unifyClosedComposites" #-}unifyClosedComposites uFields vFields
+            (CompositeTailOpen uPos uCs, CompositeTailClosed) ->
+                {-# SCC "unifyOpenComposite" #-}unifyOpenComposite (uPos, uCs, uFields) vFields
+            (CompositeTailClosed, CompositeTailOpen vPos vCs) ->
+                {-# SCC "unifyOpenComposite" #-}unifyOpenComposite (vPos, vCs, vFields) uFields
             (CompositeTailOpen uPos uCs, CompositeTailOpen vPos vCs) ->
-                unifyOpenComposites (uPos, uCs, uFields) (vPos, vCs, vFields)
+                {-# SCC "unifyOpenComposites" #-}unifyOpenComposites (uPos, uCs, uFields) (vPos, vCs, vFields)
         -- We intersect-unify AFTER unifying the composite shapes, so
         -- we know the flat composites are accurate
         Map.intersectionWith unifyType uFields vFields
@@ -940,7 +946,7 @@ unifyUnbound ::
     Infer s ()
 unifyUnbound pos cs ast =
     do
-        constraintsCheck cs ast
+        {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
         writeRef (__unificationPosRef pos) $ Bound (UnifiableTypeAST ast)
 
 unifyVarAST ::
@@ -967,11 +973,12 @@ unifyTInstParams err uParams vParams
 
 unifyType :: UnifiableType -> UnifiableType -> Infer s ()
 unifyType =
-    unify f
+    {-# SCC "unifyType" #-}unify f
     where
         f uTyp@(TInst uName uParams) vTyp =
             case vTyp of
             TInst vName vParams | uName == vName ->
+                {-# SCC "unifyTInstParams" #-}
                 unifyTInstParams err uParams vParams
             _ -> throwError err
             where
@@ -1000,21 +1007,30 @@ inferRes val typ = (AV typ val, typ)
 
 inferLeaf :: Leaf -> Infer s InferResult
 inferLeaf leaf =
+    {-# SCC "inferLeaf" #-}
     case leaf of
     LEmptyRecord ->
+        {-# SCC "inferEmptyRecord" #-}
         UnifiableTypeAST TEmptyComposite & TRecord & UnifiableTypeAST & return
     LAbsurd ->
+        {-# SCC "inferAbsurd" #-}
         do
             res <- freshTVar TypeConstraints
             let emptySum = UnifiableTypeAST TEmptyComposite & TSum & UnifiableTypeAST
             TFun emptySum res & UnifiableTypeAST & return
     LGlobal n ->
+        {-# SCC "inferGlobal" #-}
         lookupGlobal n >>= \case
         Just scheme -> instantiate scheme
         Nothing -> throwError $ GlobalNotInScope n
-    LInt _ -> UnifiableTypeAST int & return
-    LHole -> freshTVar TypeConstraints
+    LInt _ ->
+        {-# SCC "inferInt" #-}
+        UnifiableTypeAST int & return
+    LHole ->
+        {-# SCC "inferHole" #-}
+        freshTVar TypeConstraints
     LVar n ->
+        {-# SCC "inferVar" #-}
         lookupLocal n >>= \case
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
@@ -1022,6 +1038,7 @@ inferLeaf leaf =
 
 inferLam :: Abs V -> Infer s InferResult
 inferLam (Abs n body) =
+    {-# SCC "inferLam" #-}
     do
         nType <- freshTVar TypeConstraints
         (body', resType) <- infer body & localScope (insertLocal n nType)
@@ -1030,6 +1047,7 @@ inferLam (Abs n body) =
 
 inferApp :: App V -> Infer s InferResult
 inferApp (App fun arg) =
+    {-# SCC "inferApp" #-}
     do
         (fun', funTyp) <- infer fun
         (arg', argTyp) <- infer arg
@@ -1041,6 +1059,7 @@ inferApp (App fun arg) =
 
 inferRecExtend :: RecExtend V -> Infer s InferResult
 inferRecExtend (RecExtend name val rest) =
+    {-# SCC "inferRecExtend" #-}
     do
         (val', valTyp) <- infer val
         (rest', restTyp) <- infer rest
@@ -1055,6 +1074,7 @@ inferRecExtend (RecExtend name val rest) =
 
 inferCase :: Case V -> Infer s InferResult
 inferCase (Case name handler restHandler) =
+    {-# SCC "inferCase" #-}
     do
         resType <- freshTVar TypeConstraints
         let toResType x = TFun x resType & UnifiableTypeAST
@@ -1079,6 +1099,7 @@ inferCase (Case name handler restHandler) =
 
 inferGetField :: GetField V -> Infer s InferResult
 inferGetField (GetField val name) =
+    {-# SCC "inferGetField" #-}
     do
         resTyp <- freshTVar TypeConstraints
         (val', valTyp) <- infer val
@@ -1092,6 +1113,7 @@ inferGetField (GetField val name) =
 
 inferInject :: Inject V -> Infer s InferResult
 inferInject (Inject name val) =
+    {-# SCC "inferInject" #-}
     do
         (val', valTyp) <- infer val
         freshTVar (CompositeConstraints (Set.singleton name))
@@ -1102,6 +1124,7 @@ inferInject (Inject name val) =
 
 infer :: V -> Infer s InferResult
 infer (V v) =
+    {-# SCC "infer" #-}
     case v of
     BLeaf x -> inferLeaf x
     BLam x -> inferLam x
@@ -1112,7 +1135,9 @@ infer (V v) =
     BCase x -> inferCase x
 
 inferScheme :: Scope -> V -> Either Err (AV UnifiableType, Scheme 'TypeT)
-inferScheme scope x = runInfer scope $ infer x >>= _2 %%~ generalize
+inferScheme scope x =
+    {-# SCC "inferScheme" #-}
+    runInfer scope $ infer x >>= _2 %%~ generalize
 
 forAll ::
     Int -> Int -> Int ->
@@ -1141,6 +1166,7 @@ globals =
 
 test :: V -> Doc
 test x =
+    {-# SCC "test" #-}
     pPrint x <+?>
     case inferScheme (newScope globals) x of
     Left err -> "causes type error:" <+> pPrint err
