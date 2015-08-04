@@ -31,7 +31,7 @@ module Type
     , CompositeTag(..), RecordT
     , ASTTag(..)
     , Type, Record
-    , TypeAST(..), bitraverse, typeSubexprs
+    , TypeAST(..), ntraverse, typeSubexprs
     , SchemeBinders(..)
     , Scheme(..)
 
@@ -156,14 +156,14 @@ instance (NFData (ast 'TypeT), NFData (ast RecordT), NFData (ast SumT), NFData (
     rnf TEmptyComposite = ()
     rnf (TCompositeExtend n t r) = rnf n `seq` rnf t `seq` rnf r
 
-{-# INLINE bitraverse #-}
-bitraverse ::
+{-# INLINE ntraverse #-}
+ntraverse ::
     Applicative f =>
     (ast 'TypeT -> f (ast' 'TypeT)) ->
     (ast RecordT -> f (ast' RecordT)) ->
     (ast SumT -> f (ast' SumT)) ->
     TypeAST tag ast -> f (TypeAST tag ast')
-bitraverse typ reco su = \case
+ntraverse typ reco su = \case
     TFun a b -> TFun <$> typ a <*> typ b
     TInst n params -> TInst n <$> traverse typ params
     TRecord r -> TRecord <$> reco r
@@ -180,7 +180,7 @@ typeSubexprs ::
     forall f t ast ast'. (Applicative f, IsTag t) =>
     (forall tag. IsTag tag => ast tag -> f (ast' tag)) ->
     TypeAST t ast -> f (TypeAST t ast')
-typeSubexprs f = bitraverse f f f
+typeSubexprs f = ntraverse f f f
 
 _TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
