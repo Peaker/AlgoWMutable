@@ -29,7 +29,7 @@ module Type
     , Tag(..)
     , CompositeTag(..), RecordT
     , ASTTag(..)
-    , Type, Record
+    , Type
     , TypeAST(..), ntraverse, typeSubexprs
     , SchemeBinders(..)
     , Scheme(..)
@@ -143,7 +143,6 @@ data TypeAST tag ast where
         !(ast ('CompositeT c)) -> TypeAST ('CompositeT c) ast
 
 type Type = TypeAST 'TypeT
-type Record = TypeAST RecordT
 type Composite c = TypeAST ('CompositeT c)
 
 instance (NFData (ast 'TypeT), NFData (ast RecordT), NFData (ast SumT), NFData (ast tag)) =>
@@ -201,12 +200,15 @@ _TSum = Lens.prism' TSum $ \case
     TSum n -> Just n
     _ -> Nothing
 
-_TEmptyComposite :: Lens.Prism' (Record a) ()
+_TEmptyComposite :: IsCompositeTag c => Lens.Prism' (TypeAST ('CompositeT c) ast) ()
 _TEmptyComposite = Lens.prism' (\() -> TEmptyComposite) $ \case
     TEmptyComposite -> Just ()
     _ -> Nothing
 
-_TCompositeExtend :: Lens.Prism' (Record ast) (Tag, ast 'TypeT, ast RecordT)
+_TCompositeExtend ::
+    IsCompositeTag c =>
+    Lens.Prism' (TypeAST ('CompositeT c) ast)
+    (Tag, ast 'TypeT, ast ('CompositeT c))
 _TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
     TCompositeExtend n t r -> Just (n, t, r)
     _ -> Nothing
