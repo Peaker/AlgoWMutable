@@ -46,7 +46,7 @@ module Type
 
     , forAll
     , test
-    , example1, example2, example3, example4, example5, example6, example7, example8, example9, example10
+    , example1, example2, example3, example4, example5, example6, example7, example8, example9, example10, example11
     , runTests
     ) where
 
@@ -1222,6 +1222,12 @@ example10 =
     $$ (f $$ x)
     $$ (f $$ recVal [("a", hole)])
 
+example11 :: V
+example11 =
+    lambda "f" $ \f ->
+    lambda "x" $ \x ->
+    f $$ (x $. "a") $$ x
+
 runTests :: Doc
 runTests =
     vcat $ map test
@@ -1235,4 +1241,5 @@ runTests =
     , example8
     , example9
     , example10
+    , example11
     ]
