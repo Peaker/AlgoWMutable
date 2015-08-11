@@ -136,7 +136,7 @@ data TypeAST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
     TInst :: {-# UNPACK #-}!TId -> !(Map TParamId (ast 'TypeT)) -> TypeAST 'TypeT ast
     TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
-    TSum :: !(ast SumT) -> Type ast
+    TSum :: !(ast SumT) -> TypeAST 'TypeT ast
     TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
     TCompositeExtend ::
         IsCompositeTag c => {-# UNPACK #-}!Tag -> !(ast 'TypeT) ->
