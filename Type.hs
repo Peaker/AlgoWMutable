@@ -1103,7 +1103,6 @@ inferRecExtend :: RecExtend V -> Infer s InferResult
 inferRecExtend (RecExtend name val rest) =
     {-# SCC "inferRecExtend" #-}
     do
-        (val', valTyp) <- infer val
         (rest', restTyp) <- infer rest
         restRecordTyp <-
             case restTyp of
@@ -1127,6 +1126,7 @@ inferRecExtend (RecExtend name val rest) =
                     return restRecordTyp
             UnifiableTypeAST t ->
                 DoesNotUnify (pPrint t) "Record type" & throwError
+        (val', valTyp) <- infer val
         TCompositeExtend name valTyp restRecordTyp
             & UnifiableTypeAST
             & TRecord & UnifiableTypeAST
