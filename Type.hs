@@ -56,7 +56,7 @@ import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
-import           Control.Monad (when, unless, zipWithM_)
+import           Control.Monad (unless, zipWithM_)
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
 import           Data.Foldable (sequenceA_)
@@ -1125,13 +1125,7 @@ inferRecExtend (RecExtend name val rest) =
                     return unknownRestFields
             UnifiableTypeAST (TRecord restRecordTyp) ->
                 do
-                    FlatComposite fields tail <- flatten restRecordTyp
-                    when (name `Map.member` fields) $ throwError $
-                        DuplicateFields [name]
-                    case tail of
-                        CompositeTailClosed -> return ()
-                        CompositeTailOpen pos (CompositeConstraints cs) ->
-                            writePos pos $ Unbound $ CompositeConstraints $ Set.insert name cs
+                    propagateConstraint restRecordTyp
                     return restRecordTyp
             UnifiableTypeAST t ->
                 DoesNotUnify (pPrint t) "Record type" & throwError
@@ -1141,6 +1135,18 @@ inferRecExtend (RecExtend name val rest) =
             & TRecord & UnifiableTypeAST
             & inferRes (BRecExtend (RecExtend name val' rest'))
             & return
+    where
+        propagateConstraint (UnifiableTypeAST x) = propagateConstraintBound x
+        propagateConstraint (UnifiableTypeVar pos) =
+            repr pos >>= \case
+            (_, Bound ast) -> propagateConstraintBound ast
+            (vPos, Unbound (CompositeConstraints cs)) ->
+                writePos vPos $ Unbound $ CompositeConstraints $
+                Set.insert name cs
+        propagateConstraintBound TEmptyComposite = return ()
+        propagateConstraintBound (TCompositeExtend fieldTag _ restTyp)
+            | fieldTag == name = DuplicateFields [name] & throwError
+            | otherwise = propagateConstraint restTyp
 
 inferCase :: Case V -> Infer s InferResult
 inferCase (Case name handler restHandler) =
