@@ -1093,10 +1093,19 @@ inferApp (App fun arg) =
     do
         (fun', funTyp) <- infer fun
         (arg', argTyp) <- infer arg
-        resTyp <- freshTVar TypeConstraints
-
-        let expectedFunTyp = TFun argTyp resTyp & UnifiableTypeAST
-        unifyType expectedFunTyp funTyp
+        resTyp <-
+            case funTyp of
+            UnifiableTypeVar pos ->
+                do
+                    resTyp <- freshTVar TypeConstraints
+                    unifyVarAST unifyTypeAST (TFun argTyp resTyp) pos
+                    return resTyp
+            UnifiableTypeAST (TFun paramTyp resTyp) ->
+                do
+                    unifyType paramTyp argTyp
+                    return resTyp
+            UnifiableTypeAST t ->
+                DoesNotUnify (pPrint t) "Function type" & throwError
         inferRes (BApp (App fun' arg')) resTyp & return
 
 inferRecExtend :: RecExtend V -> Infer s InferResult
