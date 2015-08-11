@@ -617,6 +617,8 @@ data Env s = Env
 newtype Infer s a = Infer
     { unInfer :: Env s -> ST s (Either Err a) }
     deriving (Functor)
+-- TODO: Since Infer is completely equivalent to a single ReaderT
+-- transform, it is likely that ReaderT will be no slower, bench it
 instance Applicative (Infer s) where
     {-# INLINE pure #-}
     pure x = Infer $ \_ -> pure (Right x)
@@ -658,6 +660,8 @@ throwError err = Infer $ \_ -> return $ Left err
 {-# INLINE localEnv #-}
 localEnv :: (Env s -> Env s) -> Infer s a -> Infer s a
 localEnv f (Infer act) = Infer (act . f)
+
+-- TODO: bench inlining of ref operations
 
 newRef :: a -> Infer s (RefZone.Ref a)
 newRef x =
@@ -755,6 +759,15 @@ repr x =
                         return res
         liftST $ go x
 
+schemeBindersSingleton :: forall tag. IsTag tag => TVarName tag -> Constraints tag -> SchemeBinders
+schemeBindersSingleton tvName cs =
+    case tagRefl :: ASTTagEquality tag of
+    IsTypeT Refl -> mempty { schemeTypeBinders = binders }
+    IsCompositeT (IsRecordC Refl) Refl -> mempty { schemeRecordBinders = binders }
+    IsCompositeT (IsSumC Refl) Refl -> mempty { schemeSumBinders = binders }
+    where
+        binders = Map.singleton tvName cs
+
 deref ::
     forall s tag. IsTag tag =>
     Set Int -> UnifiableTypeAST tag -> WriterT SchemeBinders (Infer s) (T tag)
@@ -769,14 +782,8 @@ deref visited = \case
                 lift (readRef tvRef) >>= \case
                     Unbound cs ->
                         do
-                            tell $
-                                case tagRefl :: ASTTagEquality tag of
-                                IsTypeT Refl -> mempty { schemeTypeBinders = binders }
-                                IsCompositeT (IsRecordC Refl) Refl -> mempty { schemeRecordBinders = binders }
-                                IsCompositeT (IsSumC Refl) Refl -> mempty { schemeSumBinders = binders }
+                            tell $ schemeBindersSingleton tvName cs
                             return $ TVar tvName
-                        where
-                            binders = Map.singleton tvName cs
                     Bound unifiable ->
                         deref (Set.insert (_tVarName tvName) visited) unifiable
         where
@@ -789,15 +796,10 @@ generalize t =
     & runWriterT
     <&> uncurry (flip Scheme)
 
-unifyMatch :: Pretty v => Doc -> v -> Lens.Getting (Monoid.First a) v a -> Infer s a
-unifyMatch expected vTyp prism =
-    case vTyp ^? prism of
-    Nothing -> throwError $ DoesNotUnify expected (pPrint vTyp)
-    Just vcontent -> return vcontent
-
 data CompositeTail c
     = CompositeTailClosed
     | CompositeTailOpen (UnificationPos ('CompositeT c)) (Constraints ('CompositeT c))
+    -- TODO(Review): The "Constraints" cache above is necessary? Can it become stale?
 
 type CompositeFields = Map Tag UnifiableType
 
@@ -1003,6 +1005,12 @@ unifyTInstParams err uParams vParams
         uSize = Map.size uParams
         vSize = Map.size vParams
         unifyParam (_, uParam) (_, vParam) = unifyType uParam vParam
+
+unifyMatch :: Pretty v => Doc -> v -> Lens.Getting (Monoid.First a) v a -> Infer s a
+unifyMatch expected vTyp prism =
+    case vTyp ^? prism of
+    Nothing -> throwError $ DoesNotUnify expected (pPrint vTyp)
+    Just vcontent -> return vcontent
 
 unifyType :: UnifiableType -> UnifiableType -> Infer s ()
 unifyType =
