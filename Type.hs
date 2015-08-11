@@ -309,20 +309,20 @@ instance NFData v => NFData (Val v) where
 instance Pretty v => Pretty (Val v) where
     pPrintPrec level prec (BLam (Abs name body)) =
         maybeParens (prec > 0) $
-        pPrint name <+> "=>" <+> pPrintPrec level 0 body
+        pPrint name <+> "→" <+> pPrintPrec level 0 body
     pPrintPrec level prec (BApp (App func arg)) =
         maybeParens (prec > 9) $
         pPrintPrec level 9 func <+> pPrintPrec level 10 arg
     pPrintPrec level prec (BRecExtend (RecExtend name val rest)) =
         maybeParens (prec > 7) $
         "{" <> pPrint name <> "="
-        <> pPrintPrec level 8 val <+> "} *"
+        <> pPrintPrec level 8 val <> "} *"
         <+?> pPrintPrec level 7 rest
     pPrintPrec level prec (BCase (Case name handler restHandler)) =
         maybeParens (prec > 7) $
-        pPrint name <> "->"
-        <> pPrintPrec level 8 handler $+$
-        "_ ->" <+> pPrintPrec level 7 restHandler
+        "case" <+> pPrint name <+> "→"
+        <+> pPrintPrec level 8 handler $+$
+        pPrintPrec level 7 restHandler
     pPrintPrec level prec (BGetField (GetField val name)) =
         maybeParens (prec > 8) $
         pPrintPrec level 8 val <> "." <> pPrint name
@@ -351,6 +351,8 @@ instance NFData a => NFData (AV a) where
 
 data T tag
     = T (TypeAST tag T)
+    -- HACK: When skolems are properly supported, they'll be qualified
+    -- vars inside the TypeAST itself
     | TVar (TVarName tag)
 instance NFData (T tag) where
     rnf (T x) = rnf x
