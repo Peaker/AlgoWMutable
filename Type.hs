@@ -835,9 +835,9 @@ unflatten (FlatComposite fields tail) =
 prettyFieldNames :: Map Tag a -> Doc
 prettyFieldNames = intercalate " " . map pPrint . Map.keys
 
-{-# INLINE unifyClosedComposites #-}
-unifyClosedComposites :: CompositeFields -> CompositeFields -> Infer s ()
-unifyClosedComposites uFields vFields
+{-# INLINE unifyCompositesClosedClosed #-}
+unifyCompositesClosedClosed :: CompositeFields -> CompositeFields -> Infer s ()
+unifyCompositesClosedClosed uFields vFields
     | Map.keysSet uFields == Map.keysSet vFields = return ()
     | otherwise =
           throwError $
@@ -873,37 +873,35 @@ writeCompositeTail (pos, cs) composite =
         {-# SCC "flatConstraintsCheck" #-}flatConstraintsCheck cs composite
         writeRef (__unificationPosRef pos) $ Bound $ unflatten composite
 
-{-# INLINE unifyOpenComposite #-}
-unifyOpenComposite ::
+{-# INLINE unifyCompositesOpenClosed #-}
+unifyCompositesOpenClosed ::
     IsCompositeTag c =>
     (UnificationPos ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     CompositeFields -> Infer s ()
-unifyOpenComposite (uTailPos, uCs, uFields) vFields
-    | Map.null uniqueUFields =
-          writeCompositeTail (uTailPos, uCs) $
-          FlatComposite uniqueVFields CompositeTailClosed
+unifyCompositesOpenClosed (openTailPos, openConstraints, openFields) closedFields
+    | Map.null uniqueOpenFields =
+          writeCompositeTail (openTailPos, openConstraints) $
+          FlatComposite uniqueClosedFields CompositeTailClosed
     | otherwise =
           throwError $
           DoesNotUnify
-          ("Record with at least fields:" <+> prettyFieldNames uFields)
-          ("Record fields:" <+> prettyFieldNames vFields)
+          ("Record with at least fields:" <+> prettyFieldNames openFields)
+          ("Record fields:" <+> prettyFieldNames closedFields)
     where
-        uniqueUFields = uFields `Map.difference` vFields
-        uniqueVFields = vFields `Map.difference` uFields
+        uniqueOpenFields = openFields `Map.difference` closedFields
+        uniqueClosedFields = closedFields `Map.difference` openFields
 
-{-# INLINE unifyOpenComposites #-}
-unifyOpenComposites ::
+{-# INLINE unifyCompositesOpenOpen #-}
+unifyCompositesOpenOpen ::
     IsCompositeTag c =>
     (UnificationPos ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     (UnificationPos ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     Infer s ()
-unifyOpenComposites (uPos, uCs, uFields) (vPos, vCs, vFields) =
+unifyCompositesOpenOpen (uPos, uCs, uFields) (vPos, vCs, vFields) =
     do
-        commonRest <- freshPos cs
-        writeCompositeTail (uPos, uCs) $
-            FlatComposite uniqueVFields $ CompositeTailOpen commonRest cs
-        writeCompositeTail (vPos, vCs) $
-            FlatComposite uniqueUFields $ CompositeTailOpen commonRest cs
+        commonRest <- freshPos cs <&> (`CompositeTailOpen` cs)
+        writeCompositeTail (uPos, uCs) $ FlatComposite uniqueVFields commonRest
+        writeCompositeTail (vPos, vCs) $ FlatComposite uniqueUFields commonRest
     where
         cs = uCs `mappend` vCs
         uniqueUFields = uFields `Map.difference` vFields
@@ -933,13 +931,13 @@ unifyCompositeAST u v =
         FlatComposite vFields vTail <- {-# SCC "unifyCompositeAST.flatten(v)" #-}flattenVal v
         case (uTail, vTail) of
             (CompositeTailClosed, CompositeTailClosed) ->
-                {-# SCC "unifyClosedComposites" #-}unifyClosedComposites uFields vFields
+                {-# SCC "unifyCompositesClosedClosed" #-}unifyCompositesClosedClosed uFields vFields
             (CompositeTailOpen uPos uCs, CompositeTailClosed) ->
-                {-# SCC "unifyOpenComposite" #-}unifyOpenComposite (uPos, uCs, uFields) vFields
+                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (uPos, uCs, uFields) vFields
             (CompositeTailClosed, CompositeTailOpen vPos vCs) ->
-                {-# SCC "unifyOpenComposite" #-}unifyOpenComposite (vPos, vCs, vFields) uFields
+                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (vPos, vCs, vFields) uFields
             (CompositeTailOpen uPos uCs, CompositeTailOpen vPos vCs) ->
-                {-# SCC "unifyOpenComposites" #-}unifyOpenComposites (uPos, uCs, uFields) (vPos, vCs, vFields)
+                {-# SCC "unifyCompositesOpenOpen" #-}unifyCompositesOpenOpen (uPos, uCs, uFields) (vPos, vCs, vFields)
         -- We intersect-unify AFTER unifying the composite shapes, so
         -- we know the flat composites are accurate
         Map.intersectionWith unifyType uFields vFields
