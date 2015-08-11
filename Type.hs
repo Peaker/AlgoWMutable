@@ -56,7 +56,7 @@ import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
-import           Control.Monad (unless, zipWithM_)
+import           Control.Monad (when, unless, zipWithM_)
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
 import           Data.Foldable (sequenceA_)
@@ -681,6 +681,9 @@ writeRef ref val =
         zone <- askEnv <&> envZone
         RefZone.writeRef zone ref val & liftST
 
+writePos :: UnificationPos tag -> IsBound tag (UnifiableTypeAST tag) -> Infer s ()
+writePos pos x = writeRef (__unificationPosRef pos) x
+
 {-# INLINE localScope #-}
 localScope :: (Scope -> Scope) -> Infer s a -> Infer s a
 localScope f = localEnv $ \e -> e { envScope = f (envScope e) }
@@ -815,12 +818,13 @@ flattenVal TEmptyComposite =
     return $ FlatComposite Map.empty CompositeTailClosed
 flattenVal (TCompositeExtend n t r) =
     flatten r <&> fcFields . Lens.at n ?~ t
-    where
-        flatten (UnifiableTypeAST ast) = flattenVal ast
-        flatten (UnifiableTypeVar pos) =
-            repr pos >>= \case
-            (_, Unbound cs) -> return $ FlatComposite Map.empty $ CompositeTailOpen pos cs
-            (_, Bound ast) -> flattenVal ast
+
+flatten :: UnifiableComposite c -> Infer s (FlatComposite c)
+flatten (UnifiableTypeAST ast) = flattenVal ast
+flatten (UnifiableTypeVar pos) =
+    repr pos >>= \case
+    (_, Unbound cs) -> return $ FlatComposite Map.empty $ CompositeTailOpen pos cs
+    (_, Bound ast) -> flattenVal ast
 
 unflatten :: IsCompositeTag c => FlatComposite c -> UnifiableComposite c
 unflatten (FlatComposite fields tail) =
@@ -871,7 +875,7 @@ writeCompositeTail ::
 writeCompositeTail (pos, cs) composite =
     do
         {-# SCC "flatConstraintsCheck" #-}flatConstraintsCheck cs composite
-        writeRef (__unificationPosRef pos) $ Bound $ unflatten composite
+        writePos pos $ Bound $ unflatten composite
 
 {-# INLINE unifyCompositesOpenClosed #-}
 unifyCompositesOpenClosed ::
@@ -958,8 +962,7 @@ unify f (UnifiableTypeVar u) (UnifiableTypeVar v) =
         -- TODO: Choose which to link into which weight/level-wise
         let link a b =
                 -- TODO: Update the "names"? They should die!
-                writeRef (__unificationPosRef a) $
-                Bound $ UnifiableTypeVar b
+                writePos a $ Bound $ UnifiableTypeVar b
         if uRef == vRef
             then return ()
             else case (ur, vr) of
@@ -980,7 +983,7 @@ unifyUnbound ::
 unifyUnbound pos cs ast =
     do
         {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
-        writeRef (__unificationPosRef pos) $ Bound (UnifiableTypeAST ast)
+        writePos pos $ Bound (UnifiableTypeAST ast)
 
 unifyVarAST ::
     (IsTag tag, Monoid (Constraints tag)) =>
@@ -1011,30 +1014,30 @@ unifyMatch expected vTyp prism =
     Just vcontent -> return vcontent
 
 unifyType :: UnifiableType -> UnifiableType -> Infer s ()
-unifyType =
-    {-# SCC "unifyType" #-}unify f
+unifyType = {-# SCC "unifyType" #-}unify unifyTypeAST
+
+unifyTypeAST :: Type UnifiableTypeAST -> Type UnifiableTypeAST -> Infer s ()
+unifyTypeAST uTyp@(TInst uName uParams) vTyp =
+    case vTyp of
+    TInst vName vParams | uName == vName ->
+        {-# SCC "unifyTInstParams" #-}
+        unifyTInstParams err uParams vParams
+    _ -> throwError err
     where
-        f uTyp@(TInst uName uParams) vTyp =
-            case vTyp of
-            TInst vName vParams | uName == vName ->
-                {-# SCC "unifyTInstParams" #-}
-                unifyTInstParams err uParams vParams
-            _ -> throwError err
-            where
-                err = DoesNotUnify (pPrint uTyp) (pPrint vTyp)
-        f (TRecord uRec) vTyp =
-            do
-                vRec <- unifyMatch "TRecord" vTyp _TRecord
-                unifyComposite uRec vRec
-        f (TSum uSum) vTyp =
-            do
-                vSum <- unifyMatch "TSum" vTyp _TSum
-                unifyComposite uSum vSum
-        f (TFun uArg uRes) vTyp =
-            do
-                (vArg, vRes) <- unifyMatch "TFun" vTyp _TFun
-                unifyType uArg vArg
-                unifyType uRes vRes
+        err = DoesNotUnify (pPrint uTyp) (pPrint vTyp)
+unifyTypeAST (TRecord uRec) vTyp =
+    do
+        vRec <- unifyMatch "TRecord" vTyp _TRecord
+        unifyComposite uRec vRec
+unifyTypeAST (TSum uSum) vTyp =
+    do
+        vSum <- unifyMatch "TSum" vTyp _TSum
+        unifyComposite uSum vSum
+unifyTypeAST (TFun uArg uRes) vTyp =
+    do
+        (vArg, vRes) <- unifyMatch "TFun" vTyp _TFun
+        unifyType uArg vArg
+        unifyType uRes vRes
 
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
@@ -1102,10 +1105,29 @@ inferRecExtend (RecExtend name val rest) =
     do
         (val', valTyp) <- infer val
         (rest', restTyp) <- infer rest
-        unknownRestFields <- freshTVar $ CompositeConstraints $ Set.singleton name
-        let expectedResTyp = TRecord unknownRestFields & UnifiableTypeAST
-        unifyType expectedResTyp restTyp
-        TCompositeExtend name valTyp unknownRestFields
+        restRecordTyp <-
+            case restTyp of
+            UnifiableTypeVar pos ->
+                do
+                    unknownRestFields <-
+                        freshTVar $ CompositeConstraints $
+                        Set.singleton name
+                    -- TODO (Optimization): pos known to be unbound
+                    unifyVarAST unifyTypeAST (TRecord unknownRestFields) pos
+                    return unknownRestFields
+            UnifiableTypeAST (TRecord restRecordTyp) ->
+                do
+                    FlatComposite fields tail <- flatten restRecordTyp
+                    when (name `Map.member` fields) $ throwError $
+                        DuplicateFields [name]
+                    case tail of
+                        CompositeTailClosed -> return ()
+                        CompositeTailOpen pos (CompositeConstraints cs) ->
+                            writePos pos $ Unbound $ CompositeConstraints $ Set.insert name cs
+                    return restRecordTyp
+            UnifiableTypeAST t ->
+                DoesNotUnify (pPrint t) "Record type" & throwError
+        TCompositeExtend name valTyp restRecordTyp
             & UnifiableTypeAST
             & TRecord & UnifiableTypeAST
             & inferRes (BRecExtend (RecExtend name val' rest'))
