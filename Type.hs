@@ -451,6 +451,17 @@ data Constraints tag where
     -- forbidden field set:
     CompositeConstraints :: !(Set Tag) -> Constraints ('CompositeT c)
 
+instance Eq (Constraints tag) where
+    (==) a b =
+        case a of
+        TypeConstraints ->
+            case b :: Constraints 'TypeT of
+            TypeConstraints -> True
+        CompositeConstraints x ->
+            -- GADT exhaustiveness checking, ugh!
+            case b :: tag ~ 'CompositeT c => Constraints ('CompositeT c) of
+            CompositeConstraints y -> x == y
+
 instance NFData (Constraints tag) where
     rnf TypeConstraints = ()
     rnf (CompositeConstraints cs) = rnf cs
@@ -504,11 +515,27 @@ instance NFData SchemeBinders where
     rnf (SchemeBinders x y z) = rnf x `seq` rnf y `seq` rnf z
 instance Monoid SchemeBinders where
     mempty = SchemeBinders Map.empty Map.empty Map.empty
-    mappend (SchemeBinders t0 r0 s0) (SchemeBinders t1 r1 s1) =
-        SchemeBinders
-        (Map.unionWith mappend t0 t1)
-        (Map.unionWith mappend r0 r1)
-        (Map.unionWith mappend s0 s1)
+    mappend (SchemeBinders t0 r0 s0) (SchemeBinders t1 r1 s1)
+        | enableAssertions =
+            SchemeBinders
+            -- TODO: Can use assert-same-constraints and compile out for
+            -- perf instead of mappend
+            (Map.unionWith assertSameConstraints t0 t1)
+            (Map.unionWith assertSameConstraints r0 r1)
+            (Map.unionWith assertSameConstraints s0 s1)
+        | otherwise =
+            SchemeBinders
+            (Map.union t0 t1)
+            (Map.union r0 r1)
+            (Map.union s0 s1)
+        where
+            enableAssertions = False
+            assertSameConstraints x y
+                | x == y = x
+                | otherwise =
+                  "Differing constraints of same " ++
+                  "unification variable encountered"
+                  & error
 
 nullBinders :: SchemeBinders -> Bool
 nullBinders (SchemeBinders a b c) = Map.null a && Map.null b && Map.null c
