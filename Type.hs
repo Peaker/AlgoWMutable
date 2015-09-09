@@ -70,7 +70,6 @@ import qualified Data.Set as Set
 import           Data.String (IsString)
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import           Data.Type.Equality ((:~:)(..))
 import           GHC.Exts (inline)
 import           MapPretty ()
 import           RefZone (Zone)
@@ -87,28 +86,28 @@ type RecordT = 'CompositeT 'RecordC
 type SumT = 'CompositeT 'SumC
 data ASTTag = TypeT | CompositeT CompositeTag
 
-data CompositeTagEquality c
-    = IsRecordC !(c :~: 'RecordC)
-    | IsSumC !(c :~: 'SumC)
+data CompositeTagEquality c where
+    IsRecordC :: CompositeTagEquality 'RecordC
+    IsSumC :: CompositeTagEquality 'SumC
 
 data ASTTagEquality t where
-    IsTypeT :: !(t :~: 'TypeT) -> ASTTagEquality t
-    IsCompositeT :: !(CompositeTagEquality c) -> !(t :~: 'CompositeT c) -> ASTTagEquality t
+    IsTypeT :: ASTTagEquality 'TypeT
+    IsCompositeT :: !(CompositeTagEquality c) -> ASTTagEquality ('CompositeT c)
 
 class IsCompositeTag t where
     compositeTagRefl :: CompositeTagEquality t
     compositeChar :: Proxy t -> Char
 instance IsCompositeTag 'RecordC where
-    compositeTagRefl = IsRecordC Refl
+    compositeTagRefl = IsRecordC
     compositeChar _ = '*'
 instance IsCompositeTag 'SumC where
-    compositeTagRefl = IsSumC Refl
+    compositeTagRefl = IsSumC
     compositeChar _ = '+'
 
 class IsTag t where tagRefl :: ASTTagEquality t
-instance IsTag 'TypeT where tagRefl = IsTypeT Refl
+instance IsTag 'TypeT where tagRefl = IsTypeT
 instance IsCompositeTag c => IsTag ('CompositeT c) where
-    tagRefl = IsCompositeT compositeTagRefl Refl
+    tagRefl = IsCompositeT compositeTagRefl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
@@ -170,8 +169,8 @@ ntraverse typ reco su = \case
     TCompositeExtend n t (r :: ast ('CompositeT c)) ->
         TCompositeExtend n <$> typ t <*>
         case compositeTagRefl :: CompositeTagEquality c of
-        IsRecordC Refl -> reco r
-        IsSumC Refl -> su r
+        IsRecordC -> reco r
+        IsSumC -> su r
 
 {-# INLINE typeSubexprs #-}
 typeSubexprs ::
@@ -740,9 +739,9 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
                 ntraverse (go typeUFs) (go recordUFs) (go sumUFs) typeAST
                 <&> UnifiableTypeAST
         {-# SCC "instantiate.go" #-}typ & case tagRefl :: ASTTagEquality tag of
-            IsTypeT Refl -> go typeUFs
-            IsCompositeT (IsRecordC Refl) Refl -> go recordUFs
-            IsCompositeT (IsSumC Refl) Refl -> go sumUFs
+            IsTypeT -> go typeUFs
+            IsCompositeT IsRecordC -> go recordUFs
+            IsCompositeT IsSumC -> go sumUFs
 
 repr ::
     UnificationPos tag ->
@@ -765,9 +764,9 @@ repr x =
 schemeBindersSingleton :: forall tag. IsTag tag => TVarName tag -> Constraints tag -> SchemeBinders
 schemeBindersSingleton tvName cs =
     case tagRefl :: ASTTagEquality tag of
-    IsTypeT Refl -> mempty { schemeTypeBinders = binders }
-    IsCompositeT (IsRecordC Refl) Refl -> mempty { schemeRecordBinders = binders }
-    IsCompositeT (IsSumC Refl) Refl -> mempty { schemeSumBinders = binders }
+    IsTypeT -> mempty { schemeTypeBinders = binders }
+    IsCompositeT IsRecordC -> mempty { schemeRecordBinders = binders }
+    IsCompositeT IsSumC -> mempty { schemeSumBinders = binders }
     where
         binders = Map.singleton tvName cs
 
