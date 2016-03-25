@@ -279,19 +279,19 @@ data IsBound tag bound
     | Bound bound
     deriving (Functor, Foldable, Traversable)
 
-data UnificationPos tag = UnificationPos
+data MetaVar tag = MetaVar
     { __unificationPosNames :: Set (TVarName tag)
       -- TODO: Remove names, use mutable bit/level instead
     , __unificationPosRef :: RefZone.Ref (IsBound tag (UnifiableTypeAST tag))
     }
-instance NFData (UnificationPos tag) where rnf (UnificationPos x y) = rnf x `seq` rnf y
-instance Pretty (UnificationPos tag) where
-    pPrint (UnificationPos names _) = "?" <> pPrint (Set.toList names)
+instance NFData (MetaVar tag) where rnf (MetaVar x y) = rnf x `seq` rnf y
+instance Pretty (MetaVar tag) where
+    pPrint (MetaVar names _) = "?" <> pPrint (Set.toList names)
 
 type UnifiableType = UnifiableTypeAST 'TypeT
 type UnifiableComposite c = UnifiableTypeAST ('CompositeT c)
 data UnifiableTypeAST tag
-    = UnifiableTypeVar (UnificationPos tag)
+    = UnifiableTypeVar (MetaVar tag)
     | UnifiableTypeAST (TypeAST tag UnifiableTypeAST)
 instance NFData (UnifiableTypeAST tag) where
     rnf (UnifiableTypeVar x) = rnf x
@@ -301,7 +301,7 @@ instance Pretty (TypeAST tag UnifiableTypeAST) => Pretty (UnifiableTypeAST tag) 
     pPrint (UnifiableTypeAST t) = pPrint t
 
 Lens.makePrisms ''IsBound
-Lens.makeLenses ''UnificationPos
+Lens.makeLenses ''MetaVar
 
 type TVarBinders tag = Map (TVarName tag) (Constraints tag)
 
@@ -495,7 +495,7 @@ writeRef ref val =
         zone <- askEnv <&> envZone
         RefZone.writeRef zone ref val & liftST
 
-writePos :: UnificationPos tag -> IsBound tag (UnifiableTypeAST tag) -> Infer s ()
+writePos :: MetaVar tag -> IsBound tag (UnifiableTypeAST tag) -> Infer s ()
 writePos pos x = writeRef (__unificationPosRef pos) x
 
 {-# INLINE localScope #-}
@@ -528,12 +528,12 @@ nextFresh =
 freshTVarName :: Infer s (TVarName tag)
 freshTVarName = nextFresh <&> TVarName
 
-freshPos :: Constraints tag -> Infer s (UnificationPos tag)
+freshPos :: Constraints tag -> Infer s (MetaVar tag)
 freshPos cs =
     do
         tvarName <- freshTVarName
         ref <- Unbound cs & newRef
-        UnificationPos (Set.singleton tvarName) ref & return
+        MetaVar (Set.singleton tvarName) ref & return
 
 {-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (UnifiableTypeAST tag)
@@ -559,12 +559,12 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
             IsCompositeT IsSumC -> go sumUFs
 
 repr ::
-    UnificationPos tag ->
-    Infer s (UnificationPos tag, IsBound tag (TypeAST tag UnifiableTypeAST))
+    MetaVar tag ->
+    Infer s (MetaVar tag, IsBound tag (TypeAST tag UnifiableTypeAST))
 repr x =
     do
         zone <- askEnv <&> envZone
-        let go pos@(UnificationPos _ ref) =
+        let go pos@(MetaVar _ ref) =
                 RefZone.readRef zone ref >>= \case
                 Unbound uCs -> return (pos, Unbound uCs)
                 Bound (UnifiableTypeAST ast) -> return (pos, Bound ast)
@@ -591,7 +591,7 @@ deref ::
 deref visited = \case
     UnifiableTypeAST ast ->
         ast & ntraverse (deref visited) (deref visited) (deref visited) <&> T
-    UnifiableTypeVar (UnificationPos names tvRef)
+    UnifiableTypeVar (MetaVar names tvRef)
         | _tVarName tvName `Set.member` visited ->
               throwError InfiniteType & lift
         | otherwise ->
@@ -615,7 +615,7 @@ generalize t =
 
 data CompositeTail c
     = CompositeTailClosed
-    | CompositeTailOpen (UnificationPos ('CompositeT c)) (Constraints ('CompositeT c))
+    | CompositeTailOpen (MetaVar ('CompositeT c)) (Constraints ('CompositeT c))
     -- TODO(Review): The "Constraints" cache above is necessary? Can it become stale?
 
 type CompositeFields = Map Tag UnifiableType
@@ -671,7 +671,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
             Set.toList duplicates
         case innerTail of
             CompositeTailClosed -> return ()
-            CompositeTailOpen (UnificationPos _ ref) innerConstraints ->
+            CompositeTailOpen (MetaVar _ ref) innerConstraints ->
                 writeRef ref $ Unbound $ outerConstraints `mappend` innerConstraints
     where
         FlatComposite innerFields innerTail = flatComposite
@@ -684,7 +684,7 @@ constraintsCheck cs@CompositeConstraints{} inner =
 
 writeCompositeTail ::
     IsCompositeTag c =>
-    (UnificationPos ('CompositeT c), Constraints ('CompositeT c)) ->
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
     FlatComposite c -> Infer s ()
 writeCompositeTail (pos, cs) composite =
     do
@@ -694,7 +694,7 @@ writeCompositeTail (pos, cs) composite =
 {-# INLINE unifyCompositesOpenClosed #-}
 unifyCompositesOpenClosed ::
     IsCompositeTag c =>
-    (UnificationPos ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     CompositeFields -> Infer s ()
 unifyCompositesOpenClosed (openTailPos, openConstraints, openFields) closedFields
     | Map.null uniqueOpenFields =
@@ -712,8 +712,8 @@ unifyCompositesOpenClosed (openTailPos, openConstraints, openFields) closedField
 {-# INLINE unifyCompositesOpenOpen #-}
 unifyCompositesOpenOpen ::
     IsCompositeTag c =>
-    (UnificationPos ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
-    (UnificationPos ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     Infer s ()
 unifyCompositesOpenOpen (uPos, uCs, uFields) (vPos, vCs, vFields) =
     do
@@ -771,8 +771,8 @@ unify f (UnifiableTypeAST u) (UnifiableTypeVar v) = unifyVarAST f u v
 unify f (UnifiableTypeVar u) (UnifiableTypeAST v) = unifyVarAST f v u
 unify f (UnifiableTypeVar u) (UnifiableTypeVar v) =
     do
-        (uPos@(UnificationPos _ uRef), ur) <- repr u
-        (vPos@(UnificationPos _ vRef), vr) <- repr v
+        (uPos@(MetaVar _ uRef), ur) <- repr u
+        (vPos@(MetaVar _ vRef), vr) <- repr v
         -- TODO: Choose which to link into which weight/level-wise
         let link a b =
                 -- TODO: Update the "names"? They should die!
@@ -791,7 +791,7 @@ unify f (UnifiableTypeVar u) (UnifiableTypeVar v) =
                     f uAst vAst
 
 unifyUnbound ::
-    UnificationPos tag -> Constraints tag -> TypeAST tag UnifiableTypeAST ->
+    MetaVar tag -> Constraints tag -> TypeAST tag UnifiableTypeAST ->
     Infer s ()
 unifyUnbound pos cs ast =
     do
@@ -802,7 +802,7 @@ unifyVarAST ::
     (IsTag tag, Monoid (Constraints tag)) =>
     (TypeAST tag UnifiableTypeAST ->
      TypeAST tag UnifiableTypeAST -> Infer s ()) ->
-    TypeAST tag UnifiableTypeAST -> UnificationPos tag -> Infer s ()
+    TypeAST tag UnifiableTypeAST -> MetaVar tag -> Infer s ()
 unifyVarAST f uAst v =
     repr v >>= \case
     (_, Bound vAst) -> f uAst vAst
