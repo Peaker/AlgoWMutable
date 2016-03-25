@@ -69,8 +69,12 @@ import           RefZone (Zone)
 import qualified RefZone as RefZone
 import           Text.PrettyPrint (fcat, vcat, hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
-import           Val (Val(..), ($$), (.$), ($.), ($=), ($+), ($-))
+import           Val (Val(..))
 import qualified Val as Val
+import           Val.Annotated (AV(..))
+import           Val.Pure (($$), (.$), ($.), ($=), ($+), ($-))
+import           Val.Pure (V(..))
+import qualified Val.Pure as V
 import           WriterT
 
 data CompositeTag = RecordC | SumC
@@ -851,10 +855,10 @@ unifyTypeAST (TFun uArg uRes) vTyp =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferResult = (Val.AV UnifiableType, UnifiableType)
+type InferResult = (AV UnifiableType, UnifiableType)
 
-inferRes :: Val (Val.AV UnifiableType) -> UnifiableType -> (Val.AV UnifiableType, UnifiableType)
-inferRes val typ = (Val.AV typ val, typ)
+inferRes :: Val (AV UnifiableType) -> UnifiableType -> (AV UnifiableType, UnifiableType)
+inferRes val typ = (AV typ val, typ)
 
 inferLeaf :: Val.Leaf -> Infer s InferResult
 inferLeaf leaf =
@@ -887,7 +891,7 @@ inferLeaf leaf =
         Nothing -> throwError $ VarNotInScope n
     <&> inferRes (Val.BLeaf leaf)
 
-inferLam :: Val.Abs Val.V -> Infer s InferResult
+inferLam :: Val.Abs V -> Infer s InferResult
 inferLam (Val.Abs n body) =
     {-# SCC "inferLam" #-}
     do
@@ -896,7 +900,7 @@ inferLam (Val.Abs n body) =
         TFun nType resType & UnifiableTypeAST
             & inferRes (Val.BLam (Val.Abs n body')) & return
 
-inferApp :: Val.App Val.V -> Infer s InferResult
+inferApp :: Val.App V -> Infer s InferResult
 inferApp (Val.App fun arg) =
     {-# SCC "inferApp" #-}
     do
@@ -917,7 +921,7 @@ inferApp (Val.App fun arg) =
                 DoesNotUnify (pPrint t) "Function type" & throwError
         inferRes (Val.BApp (Val.App fun' arg')) resTyp & return
 
-inferRecExtend :: Val.RecExtend Val.V -> Infer s InferResult
+inferRecExtend :: Val.RecExtend V -> Infer s InferResult
 inferRecExtend (Val.RecExtend name val rest) =
     {-# SCC "inferRecExtend" #-}
     do
@@ -957,7 +961,7 @@ inferRecExtend (Val.RecExtend name val rest) =
             | fieldTag == name = DuplicateFields [name] & throwError
             | otherwise = propagateConstraint restTyp
 
-inferCase :: Val.Case Val.V -> Infer s InferResult
+inferCase :: Val.Case V -> Infer s InferResult
 inferCase (Val.Case name handler restHandler) =
     {-# SCC "inferCase" #-}
     do
@@ -982,7 +986,7 @@ inferCase (Val.Case name handler restHandler) =
             & inferRes (Val.BCase (Val.Case name handler' restHandler'))
             & return
 
-inferGetField :: Val.GetField Val.V -> Infer s InferResult
+inferGetField :: Val.GetField V -> Infer s InferResult
 inferGetField (Val.GetField val name) =
     {-# SCC "inferGetField" #-}
     do
@@ -996,7 +1000,7 @@ inferGetField (Val.GetField val name) =
         unifyType expectedValTyp valTyp
         inferRes (Val.BGetField (Val.GetField val' name)) resTyp & return
 
-inferInject :: Val.Inject Val.V -> Infer s InferResult
+inferInject :: Val.Inject V -> Infer s InferResult
 inferInject (Val.Inject name val) =
     {-# SCC "inferInject" #-}
     do
@@ -1007,8 +1011,8 @@ inferInject (Val.Inject name val) =
             <&> TSum <&> UnifiableTypeAST
             <&> inferRes (Val.BInject (Val.Inject name val'))
 
-infer :: Val.V -> Infer s InferResult
-infer (Val.V v) =
+infer :: V -> Infer s InferResult
+infer (V v) =
     {-# SCC "infer" #-}
     case v of
     Val.BLeaf x -> inferLeaf x
@@ -1019,7 +1023,7 @@ infer (Val.V v) =
     Val.BInject x -> inferInject x
     Val.BCase x -> inferCase x
 
-inferScheme :: Scope -> Val.V -> Either Err (Val.AV UnifiableType, Scheme 'TypeT)
+inferScheme :: Scope -> V -> Either Err (AV UnifiableType, Scheme 'TypeT)
 inferScheme scope x =
     {-# SCC "inferScheme" #-}
     runInfer scope $ infer x >>= inline _2 generalize
@@ -1049,7 +1053,7 @@ globals =
         intInfix = forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
         (==>) = Map.singleton
 
-test :: Val.V -> Doc
+test :: V -> Doc
 test x =
     {-# SCC "test" #-}
     pPrint x <+?>
@@ -1058,55 +1062,55 @@ test x =
     Right (_, typ) -> " :: " <+> pPrint typ
 
 
-example1 :: Val.V
-example1 = Val.lam "x" $ Val.lam "y" $ Val.var "x" $$ Val.var "y" $$ Val.var "y"
+example1 :: V
+example1 = V.lam "x" $ V.lam "y" $ V.var "x" $$ V.var "y" $$ V.var "y"
 
-example2 :: Val.V
-example2 = Val.lam "x" $ Val.recVal [] & "x" $= Val.var "x" & "y" $= Val.lambda "x" id
+example2 :: V
+example2 = V.lam "x" $ V.recVal [] & "x" $= V.var "x" & "y" $= V.lambda "x" id
 
-example3 :: Val.V
-example3 = Val.lam "x" $ (Val.var "x" $. "y") $$ Val.lambda "a" id
+example3 :: V
+example3 = V.lam "x" $ (V.var "x" $. "y") $$ V.lambda "a" id
 
-example4 :: Val.V
-example4 = Val.lam "x" $ Val.var "x" $$ Val.var "x"
+example4 :: V
+example4 = V.lam "x" $ V.var "x" $$ V.var "x"
 
-example5 :: Val.V
-example5 = Val.lam "x" $ (Val.var "x" $. "y") $$ (Val.var "x" $. "y")
+example5 :: V
+example5 = V.lam "x" $ (V.var "x" $. "y") $$ (V.var "x" $. "y")
 
-example6 :: Val.V
-example6 = Val.recVal [("x", Val.recVal []), ("y", Val.recVal [])]
+example6 :: V
+example6 = V.recVal [("x", V.recVal []), ("y", V.recVal [])]
 
-example7 :: Val.V
+example7 :: V
 example7 =
-    Val.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
+    V.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
 
-example8 :: Val.V
+example8 :: V
 example8 =
-    Val.lambda "g" $ \g ->
-    Val.lambda "f" $ \f ->
-    Val.lambda "x" $ \x ->
+    V.lambda "g" $ \g ->
+    V.lambda "f" $ \f ->
+    V.lambda "x" $ \x ->
     g $$ (f $$ "Just" .$ x)
-      $$ (f $$ "Nothing" .$ Val.recVal [])
+      $$ (f $$ "Nothing" .$ V.recVal [])
 
-example9 :: Val.V
+example9 :: V
 example9 =
-    Val.cases
-    [ ("Nothing", Val.lam "_" (Val.litInt 0))
-    , ("Just", Val.lambda "x" $ \x -> Val.litInt 1 $+ x)
+    V.cases
+    [ ("Nothing", V.lam "_" (V.litInt 0))
+    , ("Just", V.lambda "x" $ \x -> V.litInt 1 $+ x)
     ]
 
-example10 :: Val.V
+example10 :: V
 example10 =
-    Val.lambda "f" $ \f ->
-    Val.lambda "x" $ \x ->
+    V.lambda "f" $ \f ->
+    V.lambda "x" $ \x ->
     (x $. "a")
     $$ (f $$ x)
-    $$ (f $$ Val.recVal [("a", Val.hole)])
+    $$ (f $$ V.recVal [("a", V.hole)])
 
-example11 :: Val.V
+example11 :: V
 example11 =
-    Val.lambda "f" $ \f ->
-    Val.lambda "x" $ \x ->
+    V.lambda "f" $ \f ->
+    V.lambda "x" $ \x ->
     f $$ (x $. "a") $$ x
 
 runTests :: Doc

@@ -22,7 +22,8 @@ import qualified Data.Map as Map
 import           Type (T, (~>), ASTTag(..))
 import qualified Type as Type
 import qualified Val as Val
-import           Val (V, ($$), ($$:))
+import qualified Val.Pure as V
+import           Val.Pure (V, ($$), ($$:))
 
 type TType = T 'Type.TypeT
 
@@ -33,12 +34,12 @@ infixType a b c = Type.recordType [("l", a), ("r", b)] ~> c
 -- TODO: TCon "->" instead of TFun
 
 eLet :: Val.Var -> V -> (V -> V) -> V
-eLet name val mkBody = Val.lam name body $$ val
+eLet name val mkBody = V.lam name body $$ val
     where
-        body = mkBody $ Val.var name
+        body = mkBody $ V.var name
 
 whereItem :: Val.Var -> V -> (V -> V) -> V
-whereItem name val mkBody = Val.lambda name mkBody $$ val
+whereItem name val mkBody = V.lambda name mkBody $$ val
 
 -- openRecordType :: Text -> [(Text, TType)] -> TType
 -- openRecordType tv = TRecord . foldr (uncurry RecExtend) (CVar tv)
@@ -171,7 +172,7 @@ listOf = Type.tInst "List" . Map.singleton "elem"
 --     CEmpty
 
 infixArgs :: V -> V -> V
-infixArgs l r = Val.recVal [("l", l), ("r", r)]
+infixArgs l r = V.recVal [("l", l), ("r", r)]
 
 -- env :: Loaded
 env :: Type.Scope
@@ -229,103 +230,103 @@ env = Type.newScope $
     -- }
 
 list :: [V] -> V
-list = foldr cons (Val.global "[]")
+list = foldr cons (V.global "[]")
 
 cons :: V -> V -> V
-cons h t = Val.global ":" $$: [("head", h), ("tail", t)]
+cons h t = V.global ":" $$: [("head", h), ("tail", t)]
 
 factorialVal :: V
 factorialVal =
-    Val.global "fix" $$
-    Val.lambda "loop"
+    V.global "fix" $$
+    V.lambda "loop"
     ( \loop ->
-        Val.lambda "x" $ \x ->
-        Val.global "if" $$:
-        [ ( "condition", Val.global "==" $$
-                infixArgs x (Val.litInt 0) )
-        , ( "then", Val.litInt 1 )
-        , ( "else", Val.global "*" $$
-                infixArgs x (loop $$ (Val.global "-" $$ infixArgs x (Val.litInt 1)))
+        V.lambda "x" $ \x ->
+        V.global "if" $$:
+        [ ( "condition", V.global "==" $$
+                infixArgs x (V.litInt 0) )
+        , ( "then", V.litInt 1 )
+        , ( "else", V.global "*" $$
+                infixArgs x (loop $$ (V.global "-" $$ infixArgs x (V.litInt 1)))
             )
         ]
     )
 
 factorialValNoRecords :: V
 factorialValNoRecords =
-    Val.global "fix" $$
-    Val.lambda "loop"
+    V.global "fix" $$
+    V.lambda "loop"
     ( \loop ->
-        Val.lambda "x" $ \x ->
-        Val.global "bool'" $$
-        (Val.global "eq" $$ x $$ (Val.litInt 0)) $$
-        Val.litInt 1 $$
-        (Val.global "mul" $$ x $$
-         (loop $$ (Val.global "sub" $$ x $$ Val.litInt 1)))
+        V.lambda "x" $ \x ->
+        V.global "bool'" $$
+        (V.global "eq" $$ x $$ (V.litInt 0)) $$
+        V.litInt 1 $$
+        (V.global "mul" $$ x $$
+         (loop $$ (V.global "sub" $$ x $$ V.litInt 1)))
     )
 
 euler1Val :: V
 euler1Val =
-    Val.global "sum" $$
-    ( Val.global "filter" $$:
+    V.global "sum" $$
+    ( V.global "filter" $$:
         [ ( "from"
-          , Val.global ".." $$
-            infixArgs (Val.litInt 1) (Val.litInt 1000)
+          , V.global ".." $$
+            infixArgs (V.litInt 1) (V.litInt 1000)
           )
         , ( "predicate",
-            Val.lambda "x" $ \x ->
-            Val.global "||" $$ infixArgs
-            ( Val.global "==" $$ infixArgs
-              (Val.litInt 0) (Val.global "%" $$ infixArgs x (Val.litInt 3)) )
-            ( Val.global "==" $$ infixArgs
-              (Val.litInt 0) (Val.global "%" $$ infixArgs x (Val.litInt 5)) )
+            V.lambda "x" $ \x ->
+            V.global "||" $$ infixArgs
+            ( V.global "==" $$ infixArgs
+              (V.litInt 0) (V.global "%" $$ infixArgs x (V.litInt 3)) )
+            ( V.global "==" $$ infixArgs
+              (V.litInt 0) (V.global "%" $$ infixArgs x (V.litInt 5)) )
           )
         ]
     )
 
 solveDepressedQuarticVal :: V
 solveDepressedQuarticVal =
-    Val.lambdaRecord "params" ["e", "d", "c"] $ \[e, d, c] ->
-    whereItem "solvePoly" (Val.global "id")
+    V.lambdaRecord "params" ["e", "d", "c"] $ \[e, d, c] ->
+    whereItem "solvePoly" (V.global "id")
     $ \solvePoly ->
     whereItem "sqrts"
-    ( Val.lambda "x" $ \x ->
+    ( V.lambda "x" $ \x ->
         whereItem "r"
-        ( Val.global "sqrt" $$ x
+        ( V.global "sqrt" $$ x
         ) $ \r ->
-        list [r, Val.global "negate" $$ r]
+        list [r, V.global "negate" $$ r]
     )
     $ \sqrts ->
-    Val.global "if" $$:
-    [ ("condition", Val.global "==" $$ infixArgs d (Val.litInt 0))
+    V.global "if" $$:
+    [ ("condition", V.global "==" $$ infixArgs d (V.litInt 0))
     , ( "then"
-      , Val.global "concat" $$
-        ( Val.global "map" $$:
-          [ ("list", solvePoly $$ list [e, c, Val.litInt 1])
+      , V.global "concat" $$
+        ( V.global "map" $$:
+          [ ("list", solvePoly $$ list [e, c, V.litInt 1])
           , ("mapping", sqrts)
           ]
         )
       )
     , ( "else",
-        Val.global "concat" $$
-        ( Val.global "map" $$:
+        V.global "concat" $$
+        ( V.global "map" $$:
           [ ( "list"
             , sqrts $$
-              ( Val.global "head" $$
+              ( V.global "head" $$
                 ( solvePoly $$ list
-                  [ Val.global "negate" $$ (d %* d)
-                  , (c %* c) %- (Val.litInt 4 %* e)
-                  , Val.litInt 2 %* c
-                  , Val.litInt 1
+                  [ V.global "negate" $$ (d %* d)
+                  , (c %* c) %- (V.litInt 4 %* e)
+                  , V.litInt 2 %* c
+                  , V.litInt 1
                   ]
                 )
               )
             )
           , ( "mapping"
-            , Val.lambda "x" $ \x ->
+            , V.lambda "x" $ \x ->
               solvePoly $$ list
               [ (c %+ (x %* x)) %- (d %/ x)
-              , Val.litInt 2 %* x
-              , Val.litInt 2
+              , V.litInt 2 %* x
+              , V.litInt 2
               ]
             )
           ]
@@ -339,7 +340,7 @@ solveDepressedQuarticVal =
         (%/) = inf "/"
 
 inf :: Val.GlobalId -> V -> V -> V
-inf str x y = Val.global str $$ infixArgs x y
+inf str x y = V.global str $$ infixArgs x y
 
 -- factorsVal :: V
 -- factorsVal =
