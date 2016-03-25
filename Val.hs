@@ -7,7 +7,6 @@
 {-# LANGUAGE DeriveTraversable #-}
 module Val
     ( Val(..)
-    , GlobalId(..)
     , Leaf(..)
     , Abs(..), Var(..)
     , App(..)
@@ -29,7 +28,6 @@ import Prelude.Compat
 
 data Leaf
     = LVar Var
-    | LGlobal GlobalId
     | LEmptyRecord
     | LAbsurd
     | LInt Int
@@ -37,7 +35,6 @@ data Leaf
     deriving (Show)
 instance NFData Leaf where
     rnf (LVar x) = rnf x
-    rnf (LGlobal x) = rnf x
     rnf (LInt x) = rnf x
     rnf LEmptyRecord = ()
     rnf LAbsurd = ()
@@ -45,14 +42,10 @@ instance NFData Leaf where
 
 instance Pretty Leaf where
     pPrint (LVar x) = pPrint x
-    pPrint (LGlobal x) = pPrint x
     pPrint LEmptyRecord = "{}"
     pPrint LAbsurd = "Absurd"
     pPrint (LInt x) = pPrint x
     pPrint LHole = "?"
-
-newtype GlobalId = GlobalId { _globalId :: Identifier }
-    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
 newtype Var = Var { _var :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)

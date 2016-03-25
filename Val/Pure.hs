@@ -8,7 +8,7 @@ module Val.Pure
     , absurd, case_, cases
     , litInt, hole
     , ($$), ($$:), ($=), ($.), (.$), ($+), ($-)
-    , recVal, var, global, infixApp
+    , recVal, var, infixApp
     ) where
 
 import Identifier (Tag(..))
@@ -70,11 +70,8 @@ x .$ y = V $ BInject $ Inject x y
 var :: Var -> V
 var = V . BLeaf . LVar
 
-global :: GlobalId -> V
-global = V . BLeaf . LGlobal
-
-infixApp :: GlobalId -> V -> V -> V
-infixApp name x y = global name $$: [("l", x), ("r", y)]
+infixApp :: Var -> V -> V -> V
+infixApp name x y = var name $$: [("l", x), ("r", y)]
 
 ($+) :: V -> V -> V
 ($+) = infixApp "+"

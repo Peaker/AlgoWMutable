@@ -29,7 +29,7 @@ import           Prelude.Compat
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
 infixType a b c = recordType [("l", a), ("r", b)] ~> c
 
-globals :: Map Val.GlobalId (Scheme 'TypeT)
+globals :: Map Val.Var (Scheme 'TypeT)
 globals =
     mconcat
     [ "+" ==> intInfix

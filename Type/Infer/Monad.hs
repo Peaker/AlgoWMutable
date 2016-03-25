@@ -53,7 +53,6 @@ import           Prelude.Compat
 data Err
     = DoesNotUnify Doc Doc
     | VarNotInScope Val.Var
-    | GlobalNotInScope Val.GlobalId
     | InfiniteType
     | DuplicateFields [Tag]
     deriving (Show)
@@ -62,8 +61,6 @@ instance Pretty Err where
     pPrint (DoesNotUnify expected got) =
         "expected:" <+> expected <+> "but got:" <+> got
     pPrint (VarNotInScope name) =
-        pPrint name <+> "not in scope!"
-    pPrint (GlobalNotInScope name) =
         pPrint name <+> "not in scope!"
     pPrint InfiniteType =
         "Infinite type encountered"
@@ -160,7 +157,7 @@ lookupLocal :: Val.Var -> Infer s (Maybe MetaType)
 lookupLocal v = askScope <&> Scope.lookupLocal v
 
 {-# INLINE lookupGlobal #-}
-lookupGlobal :: Val.GlobalId -> Infer s (Maybe (Scheme 'TypeT))
+lookupGlobal :: Val.Var -> Infer s (Maybe (Scheme 'TypeT))
 lookupGlobal v = askScope <&> Scope.lookupGlobal v
 
 nextFresh :: Infer s Int

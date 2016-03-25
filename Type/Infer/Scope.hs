@@ -19,18 +19,18 @@ import           Prelude.Compat
 
 data Scope t = Scope
     { _scopeLocals :: Map Val.Var t
-    , _scopeGlobals :: Map Val.GlobalId (Scheme 'TypeT)
+    , _scopeGlobals :: Map Val.Var (Scheme 'TypeT)
     }
 
 lookupLocal :: Val.Var -> Scope t -> Maybe t
 lookupLocal v scope =
     Map.lookup v (_scopeLocals scope)
 
-lookupGlobal :: Val.GlobalId -> Scope t -> Maybe (Scheme 'TypeT)
+lookupGlobal :: Val.Var -> Scope t -> Maybe (Scheme 'TypeT)
 lookupGlobal v scope =
     Map.lookup v (_scopeGlobals scope)
 
-newScope :: Map Val.GlobalId (Scheme 'TypeT) -> Scope t
+newScope :: Map Val.Var (Scheme 'TypeT) -> Scope t
 newScope = Scope Map.empty
 
 emptyScope :: Scope t

@@ -52,11 +52,6 @@ inferLeaf leaf =
             res <- M.freshTVar TypeConstraints
             let emptySum = MetaTypeAST TEmptyComposite & TSum & MetaTypeAST
             TFun emptySum res & MetaTypeAST & return
-    Val.LGlobal n ->
-        {-# SCC "inferGlobal" #-}
-        M.lookupGlobal n >>= \case
-        Just scheme -> M.instantiate scheme
-        Nothing -> M.throwError $ M.GlobalNotInScope n
     Val.LInt _ ->
         {-# SCC "inferInt" #-}
         MetaTypeAST int & return
@@ -67,7 +62,11 @@ inferLeaf leaf =
         {-# SCC "inferVar" #-}
         M.lookupLocal n >>= \case
         Just typ -> return typ
-        Nothing -> M.throwError $ M.VarNotInScope n
+        Nothing ->
+            {-# SCC "inferGlobal" #-}
+            M.lookupGlobal n >>= \case
+            Just scheme -> M.instantiate scheme
+            Nothing -> M.throwError $ M.VarNotInScope n
     <&> inferRes (Val.BLeaf leaf)
 
 inferLam :: Val.Abs V -> Infer s InferResult

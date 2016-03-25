@@ -231,55 +231,55 @@ env = Scope.newScope $
     -- }
 
 list :: [V] -> V
-list = foldr cons (V.global "[]")
+list = foldr cons (V.var "[]")
 
 cons :: V -> V -> V
-cons h t = V.global ":" $$: [("head", h), ("tail", t)]
+cons h t = V.var ":" $$: [("head", h), ("tail", t)]
 
 factorialVal :: V
 factorialVal =
-    V.global "fix" $$
+    V.var "fix" $$
     V.lambda "loop"
     ( \loop ->
         V.lambda "x" $ \x ->
-        V.global "if" $$:
-        [ ( "condition", V.global "==" $$
+        V.var "if" $$:
+        [ ( "condition", V.var "==" $$
                 infixArgs x (V.litInt 0) )
         , ( "then", V.litInt 1 )
-        , ( "else", V.global "*" $$
-                infixArgs x (loop $$ (V.global "-" $$ infixArgs x (V.litInt 1)))
+        , ( "else", V.var "*" $$
+                infixArgs x (loop $$ (V.var "-" $$ infixArgs x (V.litInt 1)))
             )
         ]
     )
 
 factorialValNoRecords :: V
 factorialValNoRecords =
-    V.global "fix" $$
+    V.var "fix" $$
     V.lambda "loop"
     ( \loop ->
         V.lambda "x" $ \x ->
-        V.global "bool'" $$
-        (V.global "eq" $$ x $$ V.litInt 0) $$
+        V.var "bool'" $$
+        (V.var "eq" $$ x $$ V.litInt 0) $$
         V.litInt 1 $$
-        (V.global "mul" $$ x $$
-         (loop $$ (V.global "sub" $$ x $$ V.litInt 1)))
+        (V.var "mul" $$ x $$
+         (loop $$ (V.var "sub" $$ x $$ V.litInt 1)))
     )
 
 euler1Val :: V
 euler1Val =
-    V.global "sum" $$
-    ( V.global "filter" $$:
+    V.var "sum" $$
+    ( V.var "filter" $$:
         [ ( "from"
-          , V.global ".." $$
+          , V.var ".." $$
             infixArgs (V.litInt 1) (V.litInt 1000)
           )
         , ( "predicate",
             V.lambda "x" $ \x ->
-            V.global "||" $$ infixArgs
-            ( V.global "==" $$ infixArgs
-              (V.litInt 0) (V.global "%" $$ infixArgs x (V.litInt 3)) )
-            ( V.global "==" $$ infixArgs
-              (V.litInt 0) (V.global "%" $$ infixArgs x (V.litInt 5)) )
+            V.var "||" $$ infixArgs
+            ( V.var "==" $$ infixArgs
+              (V.litInt 0) (V.var "%" $$ infixArgs x (V.litInt 3)) )
+            ( V.var "==" $$ infixArgs
+              (V.litInt 0) (V.var "%" $$ infixArgs x (V.litInt 5)) )
           )
         ]
     )
@@ -287,34 +287,34 @@ euler1Val =
 solveDepressedQuarticVal :: V
 solveDepressedQuarticVal =
     V.lambdaRecord "params" ["e", "d", "c"] $ \[e, d, c] ->
-    whereItem "solvePoly" (V.global "id")
+    whereItem "solvePoly" (V.var "id")
     $ \solvePoly ->
     whereItem "sqrts"
     ( V.lambda "x" $ \x ->
         whereItem "r"
-        ( V.global "sqrt" $$ x
+        ( V.var "sqrt" $$ x
         ) $ \r ->
-        list [r, V.global "negate" $$ r]
+        list [r, V.var "negate" $$ r]
     )
     $ \sqrts ->
-    V.global "if" $$:
-    [ ("condition", V.global "==" $$ infixArgs d (V.litInt 0))
+    V.var "if" $$:
+    [ ("condition", V.var "==" $$ infixArgs d (V.litInt 0))
     , ( "then"
-      , V.global "concat" $$
-        ( V.global "map" $$:
+      , V.var "concat" $$
+        ( V.var "map" $$:
           [ ("list", solvePoly $$ list [e, c, V.litInt 1])
           , ("mapping", sqrts)
           ]
         )
       )
     , ( "else",
-        V.global "concat" $$
-        ( V.global "map" $$:
+        V.var "concat" $$
+        ( V.var "map" $$:
           [ ( "list"
             , sqrts $$
-              ( V.global "head" $$
+              ( V.var "head" $$
                 ( solvePoly $$ list
-                  [ V.global "negate" $$ (d %* d)
+                  [ V.var "negate" $$ (d %* d)
                   , (c %* c) %- (V.litInt 4 %* e)
                   , V.litInt 2 %* c
                   , V.litInt 1
@@ -340,8 +340,8 @@ solveDepressedQuarticVal =
         (%*) = inf "*"
         (%/) = inf "/"
 
-inf :: Val.GlobalId -> V -> V -> V
-inf str x y = V.global str $$ infixArgs x y
+inf :: Val.Var -> V -> V -> V
+inf str x y = V.var str $$ infixArgs x y
 
 -- factorsVal :: V
 -- factorsVal =
