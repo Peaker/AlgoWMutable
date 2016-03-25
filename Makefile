@@ -1,10 +1,10 @@
 default: run
 
 benchmark.O2:
-	ghc -O2 -hisuf .O2_hi -osuf .O2_o -o $@ --make benchmark.hs
+	ghc -O2 -hisuf .O2.hi -osuf .O2.o -o $@ --make benchmark.hs
 
 benchmark.O1:
-	ghc -O1 -hisuf .O1_hi -osuf .O1_o -o $@ --make benchmark.hs
+	ghc -O1 -hisuf .O1.hi -osuf .O1.o -o $@ --make benchmark.hs
 
 benchmark.p.prof: benchmark.p
 	./$< +RTS -p
