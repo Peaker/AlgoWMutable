@@ -245,6 +245,9 @@ intType = tInst "Int" Map.empty
 boolType :: T 'TypeT
 boolType = tInst "Bool" Map.empty
 
+int :: Type ast
+int = TInst "Int" Map.empty
+
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
@@ -851,9 +854,6 @@ unifyTypeAST (TFun uArg uRes) vTyp =
         (vArg, vRes) <- unifyMatch "TFun" vTyp _TFun
         unifyType uArg vArg
         unifyType uRes vRes
-
-int :: TypeAST 'TypeT ast
-int = TInst "Int" Map.empty
 
 type InferResult = (AV MetaType, MetaType)
 
