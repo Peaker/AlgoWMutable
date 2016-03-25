@@ -30,7 +30,7 @@ module Type
     , CompositeTag(..), RecordT
     , ASTTag(..)
     , Type
-    , TypeAST(..), ntraverse, typeSubexprs
+    , TypeAST(..), ntraverse
     , SchemeBinders(..)
     , Scheme(..)
 
@@ -174,13 +174,6 @@ ntraverse typ reco su = \case
         case compositeTagRefl :: CompositeTagEquality c of
         IsRecordC -> reco r
         IsSumC -> su r
-
-{-# INLINE typeSubexprs #-}
-typeSubexprs ::
-    forall f t ast ast'. (Applicative f, IsTag t) =>
-    (forall tag. IsTag tag => ast tag -> f (ast' tag)) ->
-    TypeAST t ast -> f (TypeAST t ast')
-typeSubexprs f = ntraverse f f f
 
 _TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
@@ -783,7 +776,8 @@ deref ::
     forall s tag. IsTag tag =>
     Set Int -> UnifiableTypeAST tag -> WriterT SchemeBinders (Infer s) (T tag)
 deref visited = \case
-    UnifiableTypeAST ast -> ast & typeSubexprs (deref visited) <&> T
+    UnifiableTypeAST ast ->
+        ast & ntraverse (deref visited) (deref visited) (deref visited) <&> T
     UnifiableTypeVar (UnificationPos names tvRef)
         | _tVarName tvName `Set.member` visited ->
               throwError InfiniteType & lift
