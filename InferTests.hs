@@ -14,7 +14,9 @@ import           MapPretty ()
 import           PrettyUtils ((<+?>))
 import           Text.PrettyPrint (vcat, Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type (T, (~>), recordType, intType, Scheme, forAll)
+import           Type.Pure (T, (~>), recordType, intType)
+import           Type.Scheme (Scheme)
+import qualified Type.Scheme as Scheme
 import           Type.Infer (inferScheme)
 import qualified Type.Infer.Scope as Scope
 import           Type.Tag (ASTTag(..))
@@ -34,7 +36,7 @@ globals =
     , "-" ==> intInfix
     ]
     where
-        intInfix = forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
+        intInfix = Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
         (==>) = Map.singleton
 
 test :: V -> Doc

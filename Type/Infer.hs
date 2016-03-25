@@ -14,7 +14,6 @@ import qualified Data.Set as Set
 import           GHC.Exts (inline)
 import           MapPretty ()
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import qualified Type
 import           Type (TypeAST(..), Type)
 import           Type.Constraints (Constraints(..))
 import           Type.Infer.Monad (Infer)
@@ -23,6 +22,7 @@ import           Type.Infer.Scope (Scope)
 import qualified Type.Infer.Scope as Scope
 import           Type.Infer.Unify
 import           Type.Meta
+import           Type.Scheme (Scheme)
 import           Type.Tag (ASTTag(..))
 import qualified Val
 import           Val (Val(..))
@@ -202,7 +202,7 @@ infer (V v) =
     Val.BInject x -> inferInject x
     Val.BCase x -> inferCase x
 
-inferScheme :: Scope MetaType -> V -> Either M.Err (AV MetaType, Type.Scheme 'TypeT)
+inferScheme :: Scope MetaType -> V -> Either M.Err (AV MetaType, Scheme 'TypeT)
 inferScheme scope x =
     {-# SCC "inferScheme" #-}
     M.runInfer scope $ infer x >>= inline _2 M.generalize

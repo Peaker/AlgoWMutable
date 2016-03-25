@@ -36,7 +36,9 @@ import           RefZone (Zone)
 import           Text.PrettyPrint (Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import qualified Type
-import           Type (T(..), Scheme(..), SchemeBinders(..), TVarName(..), TypeAST(..))
+import           Type (TypeAST(..))
+import           Type.Scheme (Scheme(..), SchemeBinders(..))
+import           Type.Pure (T(..), TVarName(..))
 import           Type.Constraints (Constraints(..))
 import           Type.Infer.Scope (Scope)
 import qualified Type.Infer.Scope as Scope

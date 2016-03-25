@@ -12,25 +12,25 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           MapPretty ()
 import           Type.Tag (ASTTag(..))
-import qualified Type
+import           Type.Scheme (Scheme)
 import qualified Val
 
 import           Prelude.Compat
 
 data Scope t = Scope
     { _scopeLocals :: Map Val.Var t
-    , _scopeGlobals :: Map Val.GlobalId (Type.Scheme 'TypeT)
+    , _scopeGlobals :: Map Val.GlobalId (Scheme 'TypeT)
     }
 
 lookupLocal :: Val.Var -> Scope t -> Maybe t
 lookupLocal v scope =
     Map.lookup v (_scopeLocals scope)
 
-lookupGlobal :: Val.GlobalId -> Scope t -> Maybe (Type.Scheme 'TypeT)
+lookupGlobal :: Val.GlobalId -> Scope t -> Maybe (Scheme 'TypeT)
 lookupGlobal v scope =
     Map.lookup v (_scopeGlobals scope)
 
-newScope :: Map Val.GlobalId (Type.Scheme 'TypeT) -> Scope t
+newScope :: Map Val.GlobalId (Scheme 'TypeT) -> Scope t
 newScope = Scope Map.empty
 
 emptyScope :: Scope t

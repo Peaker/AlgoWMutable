@@ -17,11 +17,12 @@ module TestVals
 import qualified Data.Map as Map
 -- -- import           Data.Monoid (Monoid(..), (<>))
 -- -- import qualified Data.Set as Set
-import           Type (T, (~>))
+import           Type.Pure (T, (~>))
 import           Type.Tag (ASTTag(..))
 import           Type.Infer.Scope (Scope)
 import qualified Type.Infer.Scope as Scope
-import qualified Type
+import qualified Type.Pure as T
+import qualified Type.Scheme as Scheme
 import qualified Val
 import qualified Val.Pure as V
 import           Val.Pure (V, ($$), ($$:))
@@ -31,7 +32,7 @@ import           Prelude.Compat
 type TType = T 'TypeT
 
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
-infixType a b c = Type.recordType [("l", a), ("r", b)] ~> c
+infixType a b c = T.recordType [("l", a), ("r", b)] ~> c
 
 -- TODO: $$ to be type-classed for TApp vs BApp
 -- TODO: TCon "->" instead of TFun
@@ -65,7 +66,7 @@ whereItem name val mkBody = V.lambda name mkBody $$ val
 --         tv = TVar tvName
 
 listOf :: TType -> TType
-listOf = Type.tInst "List" . Map.singleton "elem"
+listOf = T.tInst "List" . Map.singleton "elem"
 
 -- boolType :: TType
 -- boolType = TInst (fst boolTypePair) Map.empty
@@ -183,42 +184,42 @@ env = Scope.newScope $
     -- Loaded
     -- { loadedGlobalTypes =
         Map.fromList
-        [ ("fix",    Type.forAll 1 0 0 $ \ [a] [] [] -> (a ~> a) ~> a)
-        , ("if",     Type.forAll 1 0 0 $ \ [a] [] [] -> Type.recordType [("condition", Type.boolType), ("then", a), ("else", a)] ~> a)
-        , ("==",     Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a Type.boolType)
-        , (">",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a Type.boolType)
-        , ("%",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("*",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("-",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("+",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("/",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        [ ("fix",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> (a ~> a) ~> a)
+        , ("if",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("condition", T.boolType), ("then", a), ("else", a)] ~> a)
+        , ("==",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
+        , (">",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
+        , ("%",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("*",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("-",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("+",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("/",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
 
-        , ("bool'",  Type.forAll 1 0 0 $ \ [a] [] [] -> Type.boolType ~> a ~> a ~> a)
-        , ("eq",     Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> Type.boolType)
-        , ("mul",    Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
-        , ("sub",    Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
+        , ("bool'",  Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.boolType ~> a ~> a ~> a)
+        , ("eq",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> T.boolType)
+        , ("mul",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
+        , ("sub",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
 
-        , ("//",     Type.forAll 0 0 0 $ \ []  [] [] -> infixType Type.intType Type.intType Type.intType)
-        -- , ("sum",    Type.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
-        -- , ("filter", Type.forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
-        , (":",      Type.forAll 1 0 0 $ \ [a] [] [] -> Type.recordType [("head", a), ("tail", listOf a)] ~> listOf a)
-        , ("[]",     Type.forAll 1 0 0 $ \ [a] [] [] -> listOf a)
-        , ("concat", Type.forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
-        , ("map",    Type.forAll 2 0 0 $ \ [a, b] [] [] -> Type.recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
-        -- , ("..",     Type.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
-        , ("||",     Type.forAll 0 0 0 $ \ [] [] [] -> infixType Type.boolType Type.boolType Type.boolType)
-        , ("head",   Type.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
-        , ("negate", Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        , ("sqrt",   Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        , ("id",     Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        -- , ("zipWith",Type.forAll ["a","b","c"] $ \ [a,b,c] [] [] ->
+        , ("//",     Scheme.forAll 0 0 0 $ \ []  [] [] -> infixType T.intType T.intType T.intType)
+        -- , ("sum",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+        -- , ("filter", Scheme.forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
+        , (":",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("head", a), ("tail", listOf a)] ~> listOf a)
+        , ("[]",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a)
+        , ("concat", Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
+        , ("map",    Scheme.forAll 2 0 0 $ \ [a, b] [] [] -> T.recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
+        -- , ("..",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
+        , ("||",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType T.boolType T.boolType T.boolType)
+        , ("head",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+        , ("negate", Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+        , ("sqrt",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+        , ("id",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+        -- , ("zipWith",Scheme.forAll ["a","b","c"] $ \ [a,b,c] [] [] ->
                                   -- (a ~> b ~> c) ~> listOf a ~> listOf b ~> listOf c )
-        -- , ("Just",   Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> maybeOf a)
-        -- , ("Nothing",Type.forAll 1 0 0 $ \ [a] [] [] -> maybeOf a)
-        -- , ("maybe",  Type.forAll ["a", "b"] $ \ [a, b] [] [] -> b ~> (a ~> b) ~> maybeOf a ~> b)
-        , ("plus1",  Type.forAll 0 0 0 $ \ [] [] [] -> Type.intType ~> Type.intType)
-        -- , ("True",   Type.forAll 0 0 0 $ \ [] [] [] -> boolType)
-        -- , ("False",  Type.forAll 0 0 0 $ \ [] [] [] -> boolType)
+        -- , ("Just",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> maybeOf a)
+        -- , ("Nothing",Scheme.forAll 1 0 0 $ \ [a] [] [] -> maybeOf a)
+        -- , ("maybe",  Scheme.forAll ["a", "b"] $ \ [a, b] [] [] -> b ~> (a ~> b) ~> maybeOf a ~> b)
+        , ("plus1",  Scheme.forAll 0 0 0 $ \ [] [] [] -> T.intType ~> T.intType)
+        -- , ("True",   Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
+        -- , ("False",  Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
         ]
     -- , loadedNominals =
     --     Map.fromList

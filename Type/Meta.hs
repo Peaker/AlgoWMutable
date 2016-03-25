@@ -20,7 +20,8 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified RefZone
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type (TypeAST, TVarName)
+import           Type (TypeAST)
+import           Type.Pure (TVarName)
 import           Type.Tag (ASTTag(..))
 import           Type.Constraints (Constraints)
 
