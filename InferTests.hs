@@ -15,9 +15,8 @@ import           PrettyUtils ((<+?>))
 import           Text.PrettyPrint (vcat, Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import           Type
-import qualified Val as Val
-import           Val.Pure (($$), (.$), ($.), ($=), ($+), ($-))
-import           Val.Pure (V(..))
+import qualified Val
+import           Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Val.Pure as V
 
 import           Prelude.Compat hiding (abs, tail)

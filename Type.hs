@@ -60,11 +60,11 @@ import           Identifier (Identifier(..), Tag(..))
 import           MapPretty ()
 import           PrettyUtils ((<+?>))
 import           RefZone (Zone)
-import qualified RefZone as RefZone
+import qualified RefZone
 import           Text.PrettyPrint (hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           Val (Val(..))
-import qualified Val as Val
+import qualified Val
 import           Val.Annotated (AV(..))
 import           Val.Pure (V(..))
 import           WriterT
@@ -358,9 +358,9 @@ pPrintTV (tv, constraints) =
 instance Pretty SchemeBinders where
     pPrint (SchemeBinders tvs rtvs stvs) =
         intercalate " " $
-        (map pPrintTV (Map.toList tvs) ++
-         map pPrintTV (Map.toList rtvs) ++
-         map pPrintTV (Map.toList stvs))
+        map pPrintTV (Map.toList tvs) ++
+        map pPrintTV (Map.toList rtvs) ++
+        map pPrintTV (Map.toList stvs)
 
 instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
     pPrint (Scheme binders typ)
@@ -458,7 +458,7 @@ runInfer scope act =
     do
         fresh <- newSTRef 0
         zone <- RefZone.new
-        unInfer act $ Env { envFresh = fresh, envZone = zone, envScope = scope }
+        unInfer act Env { envFresh = fresh, envZone = zone, envScope = scope }
 
 {-# INLINE askEnv #-}
 askEnv :: Infer s (Env s)
@@ -595,15 +595,14 @@ deref visited = \case
         | _tVarName tvName `Set.member` visited ->
               throwError InfiniteType & lift
         | otherwise ->
-            do
-                -- TODO: Avoid Infer s monad and use ST directly?
-                lift (readRef tvRef) >>= \case
-                    Unbound cs ->
-                        do
-                            tell $ schemeBindersSingleton tvName cs
-                            return $ TVar tvName
-                    Bound unifiable ->
-                        deref (Set.insert (_tVarName tvName) visited) unifiable
+            -- TODO: Avoid Infer s monad and use ST directly?
+            lift (readRef tvRef) >>= \case
+            Unbound cs ->
+                do
+                    tell $ schemeBindersSingleton tvName cs
+                    return $ TVar tvName
+            Bound unifiable ->
+                deref (Set.insert (_tVarName tvName) visited) unifiable
         where
             tvName = Set.findMin names
 
@@ -778,9 +777,8 @@ unify f (UnifiableTypeVar u) (UnifiableTypeVar v) =
         let link a b =
                 -- TODO: Update the "names"? They should die!
                 writePos a $ Bound $ UnifiableTypeVar b
-        if uRef == vRef
-            then return ()
-            else case (ur, vr) of
+        unless (uRef == vRef) $
+            case (ur, vr) of
             (Unbound uCs, Unbound vCs) ->
                 do
                     link uPos vPos

@@ -18,8 +18,8 @@ import qualified Data.Map as Map
 -- -- import           Data.Monoid (Monoid(..), (<>))
 -- -- import qualified Data.Set as Set
 import           Type (T, (~>), ASTTag(..))
-import qualified Type as Type
-import qualified Val as Val
+import qualified Type
+import qualified Val
 import qualified Val.Pure as V
 import           Val.Pure (V, ($$), ($$:))
 
@@ -258,7 +258,7 @@ factorialValNoRecords =
     ( \loop ->
         V.lambda "x" $ \x ->
         V.global "bool'" $$
-        (V.global "eq" $$ x $$ (V.litInt 0)) $$
+        (V.global "eq" $$ x $$ V.litInt 0) $$
         V.litInt 1 $$
         (V.global "mul" $$ x $$
          (loop $$ (V.global "sub" $$ x $$ V.litInt 1)))

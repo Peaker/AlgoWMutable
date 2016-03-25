@@ -25,7 +25,7 @@ lam :: Var -> V -> V
 lam name body = V $ BLam $ Abs name body
 
 lambda :: Var -> (V -> V) -> V
-lambda name body = lam name $ body $ var $ name
+lambda name body = lam name $ body $ var name
 
 lambdaRecord :: Var -> [Tag] -> ([V] -> V) -> V
 lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
