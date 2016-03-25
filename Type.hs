@@ -68,18 +68,14 @@ import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.String (IsString)
-import           Data.Text (Text)
-import qualified Data.Text as Text
 import           GHC.Exts (inline)
+import           Identifier
 import           MapPretty ()
 import           RefZone (Zone)
 import qualified RefZone as RefZone
 import           Text.PrettyPrint (isEmpty, fcat, vcat, hcat, punctuate, Doc, ($+$), (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           WriterT
-
-text' :: Text -> Doc
-text' = text . Text.unpack
 
 data CompositeTag = RecordC | SumC
 type RecordT = 'CompositeT 'RecordC
@@ -112,10 +108,6 @@ instance IsCompositeTag c => IsTag ('CompositeT c) where
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
 
-newtype Identifier = Identifier { _identifierText :: Text }
-    deriving (Eq, Ord, Show, NFData, IsString)
-instance Pretty Identifier where pPrint = text' . _identifierText
-
 newtype TId = TId { _tid :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
@@ -123,9 +115,6 @@ newtype GlobalId = GlobalId { _globalId :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
 newtype Var = Var { _var :: Identifier }
-    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
-
-newtype Tag = Tag { _tag :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
 newtype TParamId = TParamId { _tParamId :: Identifier }
