@@ -19,20 +19,26 @@ import           Prelude.Compat
 import qualified Data.Map as Map
 -- -- import           Data.Monoid (Monoid(..), (<>))
 -- -- import qualified Data.Set as Set
-import           Type
+import           Type (T, (~>), ASTTag(..))
+import qualified Type as Type
+import qualified Val as Val
+import           Val (V, ($$), ($$:))
 
-type TType = T 'TypeT
+type TType = T 'Type.TypeT
+
+infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
+infixType a b c = Type.recordType [("l", a), ("r", b)] ~> c
 
 -- TODO: $$ to be type-classed for TApp vs BApp
 -- TODO: TCon "->" instead of TFun
 
-eLet :: Var -> V -> (V -> V) -> V
-eLet name val mkBody = lam name body $$ val
+eLet :: Val.Var -> V -> (V -> V) -> V
+eLet name val mkBody = Val.lam name body $$ val
     where
-        body = mkBody $ var name
+        body = mkBody $ Val.var name
 
-whereItem :: Var -> V -> (V -> V) -> V
-whereItem name val mkBody = lambda name mkBody $$ val
+whereItem :: Val.Var -> V -> (V -> V) -> V
+whereItem name val mkBody = Val.lambda name mkBody $$ val
 
 -- openRecordType :: Text -> [(Text, TType)] -> TType
 -- openRecordType tv = TRecord . foldr (uncurry RecExtend) (CVar tv)
@@ -55,7 +61,7 @@ whereItem name val mkBody = lambda name mkBody $$ val
 --         tv = TVar tvName
 
 listOf :: TType -> TType
-listOf = tInst "List" . Map.singleton "elem"
+listOf = Type.tInst "List" . Map.singleton "elem"
 
 -- boolType :: TType
 -- boolType = TInst (fst boolTypePair) Map.empty
@@ -164,54 +170,51 @@ listOf = tInst "List" . Map.singleton "elem"
 --     CExtend "Just" t $
 --     CEmpty
 
-infixType :: TType -> TType -> TType -> TType
-infixType a b c = recordType [("l", a), ("r", b)] ~> c
-
 infixArgs :: V -> V -> V
-infixArgs l r = recVal [("l", l), ("r", r)]
+infixArgs l r = Val.recVal [("l", l), ("r", r)]
 
 -- env :: Loaded
-env :: Scope
-env = newScope $
+env :: Type.Scope
+env = Type.newScope $
     -- Loaded
     -- { loadedGlobalTypes =
         Map.fromList
-        [ ("fix",    forAll 1 0 0 $ \ [a] [] [] -> (a ~> a) ~> a)
-        , ("if",     forAll 1 0 0 $ \ [a] [] [] -> recordType [("condition", boolType), ("then", a), ("else", a)] ~> a)
-        , ("==",     forAll 1 0 0 $ \ [a] [] [] -> infixType a a boolType)
-        , (">",      forAll 1 0 0 $ \ [a] [] [] -> infixType a a boolType)
-        , ("%",      forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("*",      forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("-",      forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("+",      forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("/",      forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        [ ("fix",    Type.forAll 1 0 0 $ \ [a] [] [] -> (a ~> a) ~> a)
+        , ("if",     Type.forAll 1 0 0 $ \ [a] [] [] -> Type.recordType [("condition", Type.boolType), ("then", a), ("else", a)] ~> a)
+        , ("==",     Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a Type.boolType)
+        , (">",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a Type.boolType)
+        , ("%",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("*",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("-",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("+",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+        , ("/",      Type.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
 
-        , ("bool'",  forAll 1 0 0 $ \ [a] [] [] -> boolType ~> a ~> a ~> a)
-        , ("eq",     forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> boolType)
-        , ("mul",    forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
-        , ("sub",    forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
+        , ("bool'",  Type.forAll 1 0 0 $ \ [a] [] [] -> Type.boolType ~> a ~> a ~> a)
+        , ("eq",     Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> Type.boolType)
+        , ("mul",    Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
+        , ("sub",    Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
 
-        , ("//",     forAll 0 0 0 $ \ []  [] [] -> infixType intType intType intType)
-        -- , ("sum",    forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
-        -- , ("filter", forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
-        , (":",      forAll 1 0 0 $ \ [a] [] [] -> recordType [("head", a), ("tail", listOf a)] ~> listOf a)
-        , ("[]",     forAll 1 0 0 $ \ [a] [] [] -> listOf a)
-        , ("concat", forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
-        , ("map",    forAll 2 0 0 $ \ [a, b] [] [] -> recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
-        -- , ("..",     forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
-        , ("||",     forAll 0 0 0 $ \ [] [] [] -> infixType boolType boolType boolType)
-        , ("head",   forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
-        , ("negate", forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        , ("sqrt",   forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        , ("id",     forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        -- , ("zipWith",forAll ["a","b","c"] $ \ [a,b,c] [] [] ->
+        , ("//",     Type.forAll 0 0 0 $ \ []  [] [] -> infixType Type.intType Type.intType Type.intType)
+        -- , ("sum",    Type.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+        -- , ("filter", Type.forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
+        , (":",      Type.forAll 1 0 0 $ \ [a] [] [] -> Type.recordType [("head", a), ("tail", listOf a)] ~> listOf a)
+        , ("[]",     Type.forAll 1 0 0 $ \ [a] [] [] -> listOf a)
+        , ("concat", Type.forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
+        , ("map",    Type.forAll 2 0 0 $ \ [a, b] [] [] -> Type.recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
+        -- , ("..",     Type.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
+        , ("||",     Type.forAll 0 0 0 $ \ [] [] [] -> infixType Type.boolType Type.boolType Type.boolType)
+        , ("head",   Type.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+        , ("negate", Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+        , ("sqrt",   Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+        , ("id",     Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+        -- , ("zipWith",Type.forAll ["a","b","c"] $ \ [a,b,c] [] [] ->
                                   -- (a ~> b ~> c) ~> listOf a ~> listOf b ~> listOf c )
-        -- , ("Just",   forAll 1 0 0 $ \ [a] [] [] -> a ~> maybeOf a)
-        -- , ("Nothing",forAll 1 0 0 $ \ [a] [] [] -> maybeOf a)
-        -- , ("maybe",  forAll ["a", "b"] $ \ [a, b] [] [] -> b ~> (a ~> b) ~> maybeOf a ~> b)
-        , ("plus1",  forAll 0 0 0 $ \ [] [] [] -> intType ~> intType)
-        -- , ("True",   forAll 0 0 0 $ \ [] [] [] -> boolType)
-        -- , ("False",  forAll 0 0 0 $ \ [] [] [] -> boolType)
+        -- , ("Just",   Type.forAll 1 0 0 $ \ [a] [] [] -> a ~> maybeOf a)
+        -- , ("Nothing",Type.forAll 1 0 0 $ \ [a] [] [] -> maybeOf a)
+        -- , ("maybe",  Type.forAll ["a", "b"] $ \ [a, b] [] [] -> b ~> (a ~> b) ~> maybeOf a ~> b)
+        , ("plus1",  Type.forAll 0 0 0 $ \ [] [] [] -> Type.intType ~> Type.intType)
+        -- , ("True",   Type.forAll 0 0 0 $ \ [] [] [] -> boolType)
+        -- , ("False",  Type.forAll 0 0 0 $ \ [] [] [] -> boolType)
         ]
     -- , loadedNominals =
     --     Map.fromList
@@ -226,100 +229,108 @@ env = newScope $
     -- }
 
 list :: [V] -> V
-list = foldr cons (global "[]")
+list = foldr cons (Val.global "[]")
 
 cons :: V -> V -> V
-cons h t = global ":" $$: [("head", h), ("tail", t)]
+cons h t = Val.global ":" $$: [("head", h), ("tail", t)]
 
 factorialVal :: V
 factorialVal =
-    global "fix" $$
-    lambda "loop"
+    Val.global "fix" $$
+    Val.lambda "loop"
     ( \loop ->
-        lambda "x" $ \x ->
-        global "if" $$:
-        [ ( "condition", global "==" $$
-                infixArgs x (litInt 0) )
-        , ( "then", litInt 1 )
-        , ( "else", global "*" $$
-                infixArgs x (loop $$ (global "-" $$ infixArgs x (litInt 1)))
+        Val.lambda "x" $ \x ->
+        Val.global "if" $$:
+        [ ( "condition", Val.global "==" $$
+                infixArgs x (Val.litInt 0) )
+        , ( "then", Val.litInt 1 )
+        , ( "else", Val.global "*" $$
+                infixArgs x (loop $$ (Val.global "-" $$ infixArgs x (Val.litInt 1)))
             )
         ]
     )
 
 factorialValNoRecords :: V
 factorialValNoRecords =
-    global "fix" $$
-    lambda "loop"
+    Val.global "fix" $$
+    Val.lambda "loop"
     ( \loop ->
-        lambda "x" $ \x ->
-        global "bool'" $$
-        (global "eq" $$ x $$ (litInt 0)) $$
-        litInt 1 $$
-        (global "mul" $$ x $$
-         (loop $$ (global "sub" $$ x $$ litInt 1)))
+        Val.lambda "x" $ \x ->
+        Val.global "bool'" $$
+        (Val.global "eq" $$ x $$ (Val.litInt 0)) $$
+        Val.litInt 1 $$
+        (Val.global "mul" $$ x $$
+         (loop $$ (Val.global "sub" $$ x $$ Val.litInt 1)))
     )
 
 euler1Val :: V
 euler1Val =
-    global "sum" $$
-    ( global "filter" $$:
-        [ ("from", global ".." $$ infixArgs (litInt 1) (litInt 1000))
+    Val.global "sum" $$
+    ( Val.global "filter" $$:
+        [ ( "from"
+          , Val.global ".." $$
+            infixArgs (Val.litInt 1) (Val.litInt 1000)
+          )
         , ( "predicate",
-                lambda "x" $ \x ->
-                global "||" $$ infixArgs
-                ( global "==" $$ infixArgs
-                    (litInt 0) (global "%" $$ infixArgs x (litInt 3)) )
-                ( global "==" $$ infixArgs
-                    (litInt 0) (global "%" $$ infixArgs x (litInt 5)) )
-            )
+            Val.lambda "x" $ \x ->
+            Val.global "||" $$ infixArgs
+            ( Val.global "==" $$ infixArgs
+              (Val.litInt 0) (Val.global "%" $$ infixArgs x (Val.litInt 3)) )
+            ( Val.global "==" $$ infixArgs
+              (Val.litInt 0) (Val.global "%" $$ infixArgs x (Val.litInt 5)) )
+          )
         ]
     )
 
 solveDepressedQuarticVal :: V
 solveDepressedQuarticVal =
-    lambdaRecord "params" ["e", "d", "c"] $ \[e, d, c] ->
-    whereItem "solvePoly" (global "id")
+    Val.lambdaRecord "params" ["e", "d", "c"] $ \[e, d, c] ->
+    whereItem "solvePoly" (Val.global "id")
     $ \solvePoly ->
     whereItem "sqrts"
-    ( lambda "x" $ \x ->
+    ( Val.lambda "x" $ \x ->
         whereItem "r"
-        ( global "sqrt" $$ x
+        ( Val.global "sqrt" $$ x
         ) $ \r ->
-        list [r, global "negate" $$ r]
+        list [r, Val.global "negate" $$ r]
     )
     $ \sqrts ->
-    global "if" $$:
-    [ ("condition", global "==" $$ infixArgs d (litInt 0))
-    , ( "then",
-            global "concat" $$
-            ( global "map" $$:
-                [ ("list", solvePoly $$ list [e, c, litInt 1])
-                , ("mapping", sqrts)
-                ]
-            )
+    Val.global "if" $$:
+    [ ("condition", Val.global "==" $$ infixArgs d (Val.litInt 0))
+    , ( "then"
+      , Val.global "concat" $$
+        ( Val.global "map" $$:
+          [ ("list", solvePoly $$ list [e, c, Val.litInt 1])
+          , ("mapping", sqrts)
+          ]
         )
+      )
     , ( "else",
-            global "concat" $$
-            ( global "map" $$:
-                [ ( "list", sqrts $$ (global "head" $$ (solvePoly $$ list
-                        [ global "negate" $$ (d %* d)
-                        , (c %* c) %- (litInt 4 %* e)
-                        , litInt 2 %* c
-                        , litInt 1
-                        ]))
-                    )
-                , ( "mapping",
-                        lambda "x" $ \x ->
-                        solvePoly $$ list
-                        [ (c %+ (x %* x)) %- (d %/ x)
-                        , litInt 2 %* x
-                        , litInt 2
-                        ]
-                    )
-                ]
+        Val.global "concat" $$
+        ( Val.global "map" $$:
+          [ ( "list"
+            , sqrts $$
+              ( Val.global "head" $$
+                ( solvePoly $$ list
+                  [ Val.global "negate" $$ (d %* d)
+                  , (c %* c) %- (Val.litInt 4 %* e)
+                  , Val.litInt 2 %* c
+                  , Val.litInt 1
+                  ]
+                )
+              )
             )
+          , ( "mapping"
+            , Val.lambda "x" $ \x ->
+              solvePoly $$ list
+              [ (c %+ (x %* x)) %- (d %/ x)
+              , Val.litInt 2 %* x
+              , Val.litInt 2
+              ]
+            )
+          ]
         )
+      )
     ]
     where
         (%+) = inf "+"
@@ -327,8 +338,8 @@ solveDepressedQuarticVal =
         (%*) = inf "*"
         (%/) = inf "/"
 
-inf :: GlobalId -> V -> V -> V
-inf str x y = global str $$ infixArgs x y
+inf :: Val.GlobalId -> V -> V -> V
+inf str x y = Val.global str $$ infixArgs x y
 
 -- factorsVal :: V
 -- factorsVal =

@@ -25,7 +25,6 @@ module Type
 
     , Identifier(..)
     , TId(..), TParamId(..)
-    , GlobalId(..), Var(..)
     , Tag(..)
     , CompositeTag(..), RecordT
     , ASTTag(..)
@@ -34,15 +33,10 @@ module Type
     , SchemeBinders(..)
     , Scheme(..)
 
-    , T(..), V(..), AV(..)
+    , T(..)
 
     , recordType, compositeFrom, (~>), tInst
     , intType, boolType
-    , lam, lambda, lambdaRecord
-    , absurd, case_, cases
-    , recVal, global, var, litInt
-    , hole
-    , ($$), ($=), ($.), ($+), ($-), ($$:)
 
     , forAll
     , test
@@ -69,12 +63,14 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.String (IsString)
 import           GHC.Exts (inline)
-import           Identifier
+import           Identifier (Identifier(..), Tag(..))
 import           MapPretty ()
 import           RefZone (Zone)
 import qualified RefZone as RefZone
-import           Text.PrettyPrint (isEmpty, fcat, vcat, hcat, punctuate, Doc, ($+$), (<+>), (<>), text)
+import           Text.PrettyPrint (fcat, vcat, hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
+import           Val (Val(..), ($$), (.$), ($.), ($=), ($+), ($-))
+import qualified Val as Val
 import           WriterT
 
 data CompositeTag = RecordC | SumC
@@ -109,12 +105,6 @@ newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
 
 newtype TId = TId { _tid :: Identifier }
-    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
-
-newtype GlobalId = GlobalId { _globalId :: Identifier }
-    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
-
-newtype Var = Var { _var :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
 newtype TParamId = TParamId { _tParamId :: Identifier }
@@ -228,116 +218,6 @@ instance (IsCompositeTag c,
             "{" <+> pPrint n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+?>
             text [compositeChar (Proxy :: Proxy c)] <+> pPrintPrec level 1 r
 
-data Leaf
-    = LVar Var
-    | LGlobal GlobalId
-    | LEmptyRecord
-    | LAbsurd
-    | LInt Int
-    | LHole
-    deriving (Show)
-instance NFData Leaf where
-    rnf (LVar x) = rnf x
-    rnf (LGlobal x) = rnf x
-    rnf (LInt x) = rnf x
-    rnf LEmptyRecord = ()
-    rnf LAbsurd = ()
-    rnf LHole = ()
-
-instance Pretty Leaf where
-    pPrint (LVar x) = pPrint x
-    pPrint (LGlobal x) = pPrint x
-    pPrint LEmptyRecord = "{}"
-    pPrint LAbsurd = "Absurd"
-    pPrint (LInt x) = pPrint x
-    pPrint LHole = "?"
-
-data Abs v = Abs Var !v
-    deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (Abs v) where rnf (Abs a b) = rnf a `seq` rnf b
-
-data App v = App !v !v
-    deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (App v) where rnf (App a b) = rnf a `seq` rnf b
-
-data RecExtend v = RecExtend Tag !v !v
-    deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (RecExtend v) where rnf (RecExtend a b c) = rnf a `seq` rnf b `seq` rnf c
-
-data Case v = Case Tag !v !v
-    deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (Case v) where rnf (Case a b c) = rnf a `seq` rnf b `seq` rnf c
-
-data GetField v = GetField !v Tag
-    deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (GetField v) where rnf (GetField a b) = rnf a `seq` rnf b
-
-data Inject v = Inject Tag !v
-    deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (Inject v) where rnf (Inject a b) = rnf a `seq` rnf b
-
-data Val v
-    = BLam (Abs v)
-    | BApp (App v)
-    | BRecExtend (RecExtend v)
-    | BCase (Case v)
-    | BGetField (GetField v)
-    | BInject (Inject v)
-    | BLeaf Leaf
-    deriving (Show, Functor, Foldable, Traversable)
-
-instance NFData v => NFData (Val v) where
-    rnf (BLam x) = rnf x
-    rnf (BApp x) = rnf x
-    rnf (BRecExtend x) = rnf x
-    rnf (BCase x) = rnf x
-    rnf (BGetField x) = rnf x
-    rnf (BInject x) = rnf x
-    rnf (BLeaf x) = rnf x
-
-instance Pretty v => Pretty (Val v) where
-    pPrintPrec level prec (BLam (Abs name body)) =
-        maybeParens (prec > 0) $
-        pPrint name <+> "→" <+> pPrintPrec level 0 body
-    pPrintPrec level prec (BApp (App func arg)) =
-        maybeParens (prec > 9) $
-        pPrintPrec level 9 func <+> pPrintPrec level 10 arg
-    pPrintPrec level prec (BRecExtend (RecExtend name val rest)) =
-        maybeParens (prec > 7) $
-        "{" <> pPrint name <> "="
-        <> pPrintPrec level 8 val <> "} *"
-        <+?> pPrintPrec level 7 rest
-    pPrintPrec level prec (BCase (Case name handler restHandler)) =
-        maybeParens (prec > 7) $
-        "case" <+> pPrint name <+> "→"
-        <+> pPrintPrec level 8 handler $+$
-        pPrintPrec level 7 restHandler
-    pPrintPrec level prec (BGetField (GetField val name)) =
-        maybeParens (prec > 8) $
-        pPrintPrec level 8 val <> "." <> pPrint name
-    pPrintPrec level prec (BInject (Inject name val)) =
-        maybeParens (prec > 8) $
-        pPrint name <+> pPrintPrec level 8 val
-    pPrintPrec level prec (BLeaf leaf) = pPrintPrec level prec leaf
-
-newtype V = V (Val V)
-    deriving (Show, Pretty)
-
-data AV a = AV
-    { aAnnotation :: a
-    , aVal :: Val (AV a)
-    } deriving (Show, Functor, Foldable, Traversable)
-instance Pretty a => Pretty (AV a) where
-    pPrintPrec level prec (AV ann v)
-        | isEmpty annDoc = pPrintPrec level prec v
-        | otherwise =
-        "{" <> annDoc <> "}" <>
-        pPrintPrec level 10 v
-        where
-            annDoc = pPrint ann
-instance NFData a => NFData (AV a) where
-    rnf (AV ann val) = rnf ann `seq` rnf val
-
 data T tag
     = T (TypeAST tag T)
     -- HACK: When skolems are properly supported, they'll be qualified
@@ -371,69 +251,8 @@ intType = tInst "Int" Map.empty
 boolType :: T 'TypeT
 boolType = tInst "Bool" Map.empty
 
-lam :: Var -> V -> V
-lam name body = V $ BLam $ Abs name body
-
-lambda :: Var -> (V -> V) -> V
-lambda name body = lam name $ body $ var $ name
-
-lambdaRecord :: Var -> [Tag] -> ([V] -> V) -> V
-lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
-
-absurd :: V
-absurd = V $ BLeaf LAbsurd
-
-case_ :: Tag -> V -> V -> V
-case_ name handler restHandlers = V $ BCase $ Case name handler restHandlers
-
-cases :: [(Tag, V)] -> V
-cases = foldr (uncurry case_) absurd
-
-litInt :: Int -> V
-litInt = V . BLeaf . LInt
-
-hole :: V
-hole = V $ BLeaf LHole
-
-infixl 4 $$
-($$) :: V -> V -> V
-($$) f a = V $ BApp $ App f a
-
-($$:) :: V -> [(Tag, V)] -> V
-func $$: fields = func $$ recVal fields
-
-recVal :: [(Tag, V)] -> V
-recVal = foldr extend empty
-    where
-        extend (name, val) rest = V $ BRecExtend (RecExtend name val rest)
-        empty = V $ BLeaf LEmptyRecord
-
-($=) :: Tag -> V -> V -> V
-(x $= y) z = V $ BRecExtend $ RecExtend x y z
-
-($.) :: V -> Tag -> V
-x $. y = V $ BGetField $ GetField x y
-
-(.$) :: Tag -> V -> V
-x .$ y = V $ BInject $ Inject x y
-
-var :: Var -> V
-var = V . BLeaf . LVar
-
-global :: GlobalId -> V
-global = V . BLeaf . LGlobal
-
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
 infixType a b c = recordType [("l", a), ("r", b)] ~> c
-
-infixApp :: GlobalId -> V -> V -> V
-infixApp name x y = global name $$: [("l", x), ("r", y)]
-
-($+) :: V -> V -> V
-($+) = infixApp "+"
-
-($-) :: V -> V -> V
-($-) = infixApp "-"
 
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
@@ -558,25 +377,25 @@ instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
         | otherwise = pPrint binders <> "." <+?> pPrint typ
 
 data Scope = Scope
-    { _scopeLocals :: Map Var UnifiableType
-    , _scopeGlobals :: Map GlobalId (Scheme 'TypeT)
+    { _scopeLocals :: Map Val.Var UnifiableType
+    , _scopeGlobals :: Map Val.GlobalId (Scheme 'TypeT)
     }
 
-newScope :: Map GlobalId (Scheme 'TypeT) -> Scope
+newScope :: Map Val.GlobalId (Scheme 'TypeT) -> Scope
 newScope = Scope Map.empty
 
 emptyScope :: Scope
 emptyScope = Scope Map.empty Map.empty
 
 {-# INLINE insertLocal #-}
-insertLocal :: Var -> UnifiableType -> Scope -> Scope
+insertLocal :: Val.Var -> UnifiableType -> Scope -> Scope
 insertLocal name typ (Scope locals globals) =
     Scope (Map.insert name typ locals) globals
 
 data Err
     = DoesNotUnify Doc Doc
-    | VarNotInScope Var
-    | GlobalNotInScope GlobalId
+    | VarNotInScope Val.Var
+    | GlobalNotInScope Val.GlobalId
     | InfiniteType
     | DuplicateFields [Tag]
     deriving (Show)
@@ -682,11 +501,11 @@ askScope :: Infer s Scope
 askScope = askEnv <&> envScope
 
 {-# INLINE lookupLocal #-}
-lookupLocal :: Var -> Infer s (Maybe UnifiableType)
+lookupLocal :: Val.Var -> Infer s (Maybe UnifiableType)
 lookupLocal str = askScope <&> _scopeLocals <&> Map.lookup str
 
 {-# INLINE lookupGlobal #-}
-lookupGlobal :: GlobalId -> Infer s (Maybe (Scheme 'TypeT))
+lookupGlobal :: Val.GlobalId -> Infer s (Maybe (Scheme 'TypeT))
 lookupGlobal str = askScope <&> _scopeGlobals <&> Map.lookup str
 
 nextFresh :: Infer s Int
@@ -1032,53 +851,53 @@ unifyTypeAST (TFun uArg uRes) vTyp =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferResult = (AV UnifiableType, UnifiableType)
+type InferResult = (Val.AV UnifiableType, UnifiableType)
 
-inferRes :: Val (AV UnifiableType) -> UnifiableType -> (AV UnifiableType, UnifiableType)
-inferRes val typ = (AV typ val, typ)
+inferRes :: Val (Val.AV UnifiableType) -> UnifiableType -> (Val.AV UnifiableType, UnifiableType)
+inferRes val typ = (Val.AV typ val, typ)
 
-inferLeaf :: Leaf -> Infer s InferResult
+inferLeaf :: Val.Leaf -> Infer s InferResult
 inferLeaf leaf =
     {-# SCC "inferLeaf" #-}
     case leaf of
-    LEmptyRecord ->
+    Val.LEmptyRecord ->
         {-# SCC "inferEmptyRecord" #-}
         UnifiableTypeAST TEmptyComposite & TRecord & UnifiableTypeAST & return
-    LAbsurd ->
+    Val.LAbsurd ->
         {-# SCC "inferAbsurd" #-}
         do
             res <- freshTVar TypeConstraints
             let emptySum = UnifiableTypeAST TEmptyComposite & TSum & UnifiableTypeAST
             TFun emptySum res & UnifiableTypeAST & return
-    LGlobal n ->
+    Val.LGlobal n ->
         {-# SCC "inferGlobal" #-}
         lookupGlobal n >>= \case
         Just scheme -> instantiate scheme
         Nothing -> throwError $ GlobalNotInScope n
-    LInt _ ->
+    Val.LInt _ ->
         {-# SCC "inferInt" #-}
         UnifiableTypeAST int & return
-    LHole ->
+    Val.LHole ->
         {-# SCC "inferHole" #-}
         freshTVar TypeConstraints
-    LVar n ->
+    Val.LVar n ->
         {-# SCC "inferVar" #-}
         lookupLocal n >>= \case
         Just typ -> return typ
         Nothing -> throwError $ VarNotInScope n
-    <&> inferRes (BLeaf leaf)
+    <&> inferRes (Val.BLeaf leaf)
 
-inferLam :: Abs V -> Infer s InferResult
-inferLam (Abs n body) =
+inferLam :: Val.Abs Val.V -> Infer s InferResult
+inferLam (Val.Abs n body) =
     {-# SCC "inferLam" #-}
     do
         nType <- freshTVar TypeConstraints
         (body', resType) <- infer body & localScope (insertLocal n nType)
         TFun nType resType & UnifiableTypeAST
-            & inferRes (BLam (Abs n body')) & return
+            & inferRes (Val.BLam (Val.Abs n body')) & return
 
-inferApp :: App V -> Infer s InferResult
-inferApp (App fun arg) =
+inferApp :: Val.App Val.V -> Infer s InferResult
+inferApp (Val.App fun arg) =
     {-# SCC "inferApp" #-}
     do
         (fun', funTyp) <- infer fun
@@ -1096,10 +915,10 @@ inferApp (App fun arg) =
                     return resTyp
             UnifiableTypeAST t ->
                 DoesNotUnify (pPrint t) "Function type" & throwError
-        inferRes (BApp (App fun' arg')) resTyp & return
+        inferRes (Val.BApp (Val.App fun' arg')) resTyp & return
 
-inferRecExtend :: RecExtend V -> Infer s InferResult
-inferRecExtend (RecExtend name val rest) =
+inferRecExtend :: Val.RecExtend Val.V -> Infer s InferResult
+inferRecExtend (Val.RecExtend name val rest) =
     {-# SCC "inferRecExtend" #-}
     do
         (rest', restTyp) <- infer rest
@@ -1123,7 +942,7 @@ inferRecExtend (RecExtend name val rest) =
         TCompositeExtend name valTyp restRecordTyp
             & UnifiableTypeAST
             & TRecord & UnifiableTypeAST
-            & inferRes (BRecExtend (RecExtend name val' rest'))
+            & inferRes (Val.BRecExtend (Val.RecExtend name val' rest'))
             & return
     where
         propagateConstraint (UnifiableTypeAST x) = propagateConstraintBound x
@@ -1138,8 +957,8 @@ inferRecExtend (RecExtend name val rest) =
             | fieldTag == name = DuplicateFields [name] & throwError
             | otherwise = propagateConstraint restTyp
 
-inferCase :: Case V -> Infer s InferResult
-inferCase (Case name handler restHandler) =
+inferCase :: Val.Case Val.V -> Infer s InferResult
+inferCase (Val.Case name handler restHandler) =
     {-# SCC "inferCase" #-}
     do
         resType <- freshTVar TypeConstraints
@@ -1160,11 +979,11 @@ inferCase (Case name handler restHandler) =
 
         TCompositeExtend name fieldType sumTail
             & UnifiableTypeAST & TSum & UnifiableTypeAST & toResType
-            & inferRes (BCase (Case name handler' restHandler'))
+            & inferRes (Val.BCase (Val.Case name handler' restHandler'))
             & return
 
-inferGetField :: GetField V -> Infer s InferResult
-inferGetField (GetField val name) =
+inferGetField :: Val.GetField Val.V -> Infer s InferResult
+inferGetField (Val.GetField val name) =
     {-# SCC "inferGetField" #-}
     do
         resTyp <- freshTVar TypeConstraints
@@ -1175,10 +994,10 @@ inferGetField (GetField val name) =
             <&> UnifiableTypeAST
             <&> TRecord <&> UnifiableTypeAST
         unifyType expectedValTyp valTyp
-        inferRes (BGetField (GetField val' name)) resTyp & return
+        inferRes (Val.BGetField (Val.GetField val' name)) resTyp & return
 
-inferInject :: Inject V -> Infer s InferResult
-inferInject (Inject name val) =
+inferInject :: Val.Inject Val.V -> Infer s InferResult
+inferInject (Val.Inject name val) =
     {-# SCC "inferInject" #-}
     do
         (val', valTyp) <- infer val
@@ -1186,21 +1005,21 @@ inferInject (Inject name val) =
             <&> TCompositeExtend name valTyp
             <&> UnifiableTypeAST
             <&> TSum <&> UnifiableTypeAST
-            <&> inferRes (BInject (Inject name val'))
+            <&> inferRes (Val.BInject (Val.Inject name val'))
 
-infer :: V -> Infer s InferResult
-infer (V v) =
+infer :: Val.V -> Infer s InferResult
+infer (Val.V v) =
     {-# SCC "infer" #-}
     case v of
-    BLeaf x -> inferLeaf x
-    BLam x -> inferLam x
-    BApp x -> inferApp x
-    BRecExtend x -> inferRecExtend x
-    BGetField x -> inferGetField x
-    BInject x -> inferInject x
-    BCase x -> inferCase x
+    Val.BLeaf x -> inferLeaf x
+    Val.BLam x -> inferLam x
+    Val.BApp x -> inferApp x
+    Val.BRecExtend x -> inferRecExtend x
+    Val.BGetField x -> inferGetField x
+    Val.BInject x -> inferInject x
+    Val.BCase x -> inferCase x
 
-inferScheme :: Scope -> V -> Either Err (AV UnifiableType, Scheme 'TypeT)
+inferScheme :: Scope -> Val.V -> Either Err (Val.AV UnifiableType, Scheme 'TypeT)
 inferScheme scope x =
     {-# SCC "inferScheme" #-}
     runInfer scope $ infer x >>= inline _2 generalize
@@ -1220,7 +1039,7 @@ forAll nTvs nRtvs nStvs mkType =
         rtvs = map TVarName [nTvs+1..nTvs+nRtvs]
         stvs = map TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
 
-globals :: Map GlobalId (Scheme 'TypeT)
+globals :: Map Val.GlobalId (Scheme 'TypeT)
 globals =
     mconcat
     [ "+" ==> intInfix
@@ -1230,7 +1049,7 @@ globals =
         intInfix = forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
         (==>) = Map.singleton
 
-test :: V -> Doc
+test :: Val.V -> Doc
 test x =
     {-# SCC "test" #-}
     pPrint x <+?>
@@ -1239,55 +1058,55 @@ test x =
     Right (_, typ) -> " :: " <+> pPrint typ
 
 
-example1 :: V
-example1 = lam "x" $ lam "y" $ var "x" $$ var "y" $$ var "y"
+example1 :: Val.V
+example1 = Val.lam "x" $ Val.lam "y" $ Val.var "x" $$ Val.var "y" $$ Val.var "y"
 
-example2 :: V
-example2 = lam "x" $ recVal [] & "x" $= var "x" & "y" $= lambda "x" id
+example2 :: Val.V
+example2 = Val.lam "x" $ Val.recVal [] & "x" $= Val.var "x" & "y" $= Val.lambda "x" id
 
-example3 :: V
-example3 = lam "x" $ (var "x" $. "y") $$ lambda "a" id
+example3 :: Val.V
+example3 = Val.lam "x" $ (Val.var "x" $. "y") $$ Val.lambda "a" id
 
-example4 :: V
-example4 = lam "x" $ var "x" $$ var "x"
+example4 :: Val.V
+example4 = Val.lam "x" $ Val.var "x" $$ Val.var "x"
 
-example5 :: V
-example5 = lam "x" $ (var "x" $. "y") $$ (var "x" $. "y")
+example5 :: Val.V
+example5 = Val.lam "x" $ (Val.var "x" $. "y") $$ (Val.var "x" $. "y")
 
-example6 :: V
-example6 = recVal [("x", recVal []), ("y", recVal [])]
+example6 :: Val.V
+example6 = Val.recVal [("x", Val.recVal []), ("y", Val.recVal [])]
 
-example7 :: V
+example7 :: Val.V
 example7 =
-    lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
+    Val.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
 
-example8 :: V
+example8 :: Val.V
 example8 =
-    lambda "g" $ \g ->
-    lambda "f" $ \f ->
-    lambda "x" $ \x ->
+    Val.lambda "g" $ \g ->
+    Val.lambda "f" $ \f ->
+    Val.lambda "x" $ \x ->
     g $$ (f $$ "Just" .$ x)
-      $$ (f $$ "Nothing" .$ recVal [])
+      $$ (f $$ "Nothing" .$ Val.recVal [])
 
-example9 :: V
+example9 :: Val.V
 example9 =
-    cases
-    [ ("Nothing", lam "_" (litInt 0))
-    , ("Just", lambda "x" $ \x -> litInt 1 $+ x)
+    Val.cases
+    [ ("Nothing", Val.lam "_" (Val.litInt 0))
+    , ("Just", Val.lambda "x" $ \x -> Val.litInt 1 $+ x)
     ]
 
-example10 :: V
+example10 :: Val.V
 example10 =
-    lambda "f" $ \f ->
-    lambda "x" $ \x ->
+    Val.lambda "f" $ \f ->
+    Val.lambda "x" $ \x ->
     (x $. "a")
     $$ (f $$ x)
-    $$ (f $$ recVal [("a", hole)])
+    $$ (f $$ Val.recVal [("a", Val.hole)])
 
-example11 :: V
+example11 :: Val.V
 example11 =
-    lambda "f" $ \f ->
-    lambda "x" $ \x ->
+    Val.lambda "f" $ \f ->
+    Val.lambda "x" $ \x ->
     f $$ (x $. "a") $$ x
 
 runTests :: Doc

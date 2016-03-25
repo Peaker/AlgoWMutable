@@ -12,7 +12,8 @@ import Criterion.Main (bench, defaultMain)
 import Text.PrettyPrint ((<+>))
 import Text.PrettyPrint.HughesPJClass (Pretty(..))
 
-import Type
+import Type (inferScheme)
+import Val (V)
 import TestVals
 
 benchInfer :: V -> Benchmarkable
