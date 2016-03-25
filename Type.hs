@@ -19,8 +19,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Type
-    ( Identifier(..)
-    , TId(..), TParamId(..)
+    ( TId(..), TParamId(..)
     , Type, Composite
     , TypeAST(..)
       , _TFun, _TInst, _TRecord, _TSum
