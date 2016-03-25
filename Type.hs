@@ -63,9 +63,10 @@ import           Data.String (IsString)
 import           GHC.Exts (inline)
 import           Identifier (Identifier(..), Tag(..))
 import           MapPretty ()
+import           PrettyUtils ((<+?>))
 import           RefZone (Zone)
 import qualified RefZone as RefZone
-import           Text.PrettyPrint (fcat, vcat, hcat, punctuate, Doc, (<+>), (<>), text)
+import           Text.PrettyPrint (vcat, hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           Val (Val(..))
 import qualified Val as Val
@@ -205,10 +206,6 @@ instance (Pretty (ast 'TypeT),
             | otherwise -> pPrint name <+> pPrint params
         TRecord r -> pPrintPrec level prec r
         TSum s -> pPrintPrec level prec s
-
-infixr 2 <+?>
-(<+?>) :: Doc -> Doc -> Doc
-x <+?> y = fcat [x, " " <> y]
 
 instance (IsCompositeTag c,
           Pretty (ast 'TypeT),

@@ -21,14 +21,11 @@ import Control.DeepSeq (NFData(..))
 import Data.String (IsString)
 import Identifier
 import MapPretty ()
-import Text.PrettyPrint (fcat, Doc, ($+$), (<+>), (<>))
+import PrettyUtils ((<+?>))
+import Text.PrettyPrint (($+$), (<+>), (<>))
 import Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import Prelude.Compat hiding (abs, tail)
-
-infixr 2 <+?>
-(<+?>) :: Doc -> Doc -> Doc
-x <+?> y = fcat [x, " " <> y]
 
 data Leaf
     = LVar Var
