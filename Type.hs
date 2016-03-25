@@ -11,7 +11,7 @@
 module Type
     ( TId(..), TParamId(..)
     , Type, Composite
-    , TypeAST(..)
+    , AST(..)
       , _TFun, _TInst, _TRecord, _TSum
       , _TEmptyComposite, _TCompositeExtend
     , ntraverse
@@ -40,24 +40,24 @@ newtype TId = TId { _tid :: Identifier }
 newtype TParamId = TParamId { _tParamId :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
-data TypeAST tag ast where
-    TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> TypeAST 'TypeT ast
-    TInst :: {-# UNPACK #-}!TId -> !(Map TParamId (ast 'TypeT)) -> TypeAST 'TypeT ast
-    TRecord :: !(ast RecordT) -> TypeAST 'TypeT ast
-    TSum :: !(ast SumT) -> TypeAST 'TypeT ast
-    TEmptyComposite :: IsCompositeTag c => TypeAST ('CompositeT c) ast
+data AST tag ast where
+    TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> AST 'TypeT ast
+    TInst :: {-# UNPACK #-}!TId -> !(Map TParamId (ast 'TypeT)) -> AST 'TypeT ast
+    TRecord :: !(ast RecordT) -> AST 'TypeT ast
+    TSum :: !(ast SumT) -> AST 'TypeT ast
+    TEmptyComposite :: IsCompositeTag c => AST ('CompositeT c) ast
     TCompositeExtend ::
         IsCompositeTag c => {-# UNPACK #-}!Tag -> !(ast 'TypeT) ->
-        !(ast ('CompositeT c)) -> TypeAST ('CompositeT c) ast
+        !(ast ('CompositeT c)) -> AST ('CompositeT c) ast
 
-type Type = TypeAST 'TypeT
-type Composite c = TypeAST ('CompositeT c)
+type Type = AST 'TypeT
+type Composite c = AST ('CompositeT c)
 
 instance (NFData (ast 'TypeT),
           NFData (ast RecordT),
           NFData (ast SumT),
           NFData (ast tag)) =>
-         NFData (TypeAST tag ast) where
+         NFData (AST tag ast) where
     rnf (TFun x y) = rnf x `seq` rnf y
     rnf (TInst n params) = rnf n `seq` rnf params
     rnf (TRecord record) = rnf record
@@ -71,7 +71,7 @@ ntraverse ::
     (ast 'TypeT -> f (ast' 'TypeT)) ->
     (ast RecordT -> f (ast' RecordT)) ->
     (ast SumT -> f (ast' SumT)) ->
-    TypeAST tag ast -> f (TypeAST tag ast')
+    AST tag ast -> f (AST tag ast')
 ntraverse onTypes onRecords onSums = \case
     TFun a b -> TFun <$> onTypes a <*> onTypes b
     TInst n params -> TInst n <$> traverse onTypes params
@@ -84,7 +84,7 @@ ntraverse onTypes onRecords onSums = \case
         IsRecordC -> onRecords r
         IsSumC -> onSums r
 
-_TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
+_TFun :: Lens.Prism' (AST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
     _ -> Nothing
@@ -104,14 +104,14 @@ _TSum = Lens.prism' TSum $ \case
     TSum n -> Just n
     _ -> Nothing
 
-_TEmptyComposite :: IsCompositeTag c => Lens.Prism' (TypeAST ('CompositeT c) ast) ()
+_TEmptyComposite :: IsCompositeTag c => Lens.Prism' (AST ('CompositeT c) ast) ()
 _TEmptyComposite = Lens.prism' (\() -> TEmptyComposite) $ \case
     TEmptyComposite -> Just ()
     _ -> Nothing
 
 _TCompositeExtend ::
     IsCompositeTag c =>
-    Lens.Prism' (TypeAST ('CompositeT c) ast)
+    Lens.Prism' (AST ('CompositeT c) ast)
     (Tag, ast 'TypeT, ast ('CompositeT c))
 _TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
     TCompositeExtend n t r -> Just (n, t, r)

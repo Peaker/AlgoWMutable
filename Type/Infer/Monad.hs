@@ -36,7 +36,6 @@ import           RefZone (Zone)
 import           Text.PrettyPrint (Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import qualified Type
-import           Type (TypeAST(..))
 import           Type.Scheme (Scheme(..), SchemeBinders(..))
 import           Type.Pure (T(..), TVarName(..))
 import           Type.Constraints (Constraints(..))
@@ -212,7 +211,7 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
 
 repr ::
     MetaVar tag ->
-    Infer s (MetaVar tag, IsBound tag (TypeAST tag MetaTypeAST))
+    Infer s (MetaVar tag, IsBound tag (Type.AST tag MetaTypeAST))
 repr x =
     do
         zone <- askEnv <&> envZone

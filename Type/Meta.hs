@@ -20,7 +20,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified RefZone
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type (TypeAST)
+import qualified Type
 import           Type.Pure (TVarName)
 import           Type.Tag (ASTTag(..))
 import           Type.Constraints (Constraints)
@@ -43,14 +43,14 @@ instance NFData (MetaVar tag) where rnf (MetaVar x y) = rnf x `seq` rnf y
 instance Pretty (MetaVar tag) where
     pPrint (MetaVar names _) = "?" <> pPrint (Set.toList names)
 
--- | TypeAST fixpoint that adds meta-variables
+-- | Type.AST fixpoint that adds meta-variables
 data MetaTypeAST tag
     = MetaTypeVar (MetaVar tag)
-    | MetaTypeAST (TypeAST tag MetaTypeAST)
+    | MetaTypeAST (Type.AST tag MetaTypeAST)
 instance NFData (MetaTypeAST tag) where
     rnf (MetaTypeVar x) = rnf x
     rnf (MetaTypeAST x) = rnf x
-instance Pretty (TypeAST tag MetaTypeAST) => Pretty (MetaTypeAST tag) where
+instance Pretty (Type.AST tag MetaTypeAST) => Pretty (MetaTypeAST tag) where
     pPrint (MetaTypeVar pos) = pPrint pos
     pPrint (MetaTypeAST t) = pPrint t
 

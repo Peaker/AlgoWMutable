@@ -14,7 +14,7 @@ import qualified Data.Set as Set
 import           GHC.Exts (inline)
 import           MapPretty ()
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type (TypeAST(..), Type)
+import           Type (Type, AST(..))
 import           Type.Constraints (Constraints(..))
 import           Type.Infer.Monad (Infer)
 import qualified Type.Infer.Monad as M

@@ -27,7 +27,7 @@ import           PrettyUtils (intercalate)
 import           Text.PrettyPrint (Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import qualified Type
-import           Type (Type, Composite, TypeAST(..), TParamId)
+import           Type (Type, Composite, AST(..), TParamId)
 import           Type.Constraints (Constraints(..))
 import qualified Type.Infer.Monad as M
 import           Type.Meta
@@ -99,7 +99,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
         FlatComposite innerFields innerTail = flatComposite
 
 constraintsCheck ::
-    Constraints tag -> TypeAST tag MetaTypeAST -> M.Infer s ()
+    Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
 constraintsCheck TypeConstraints _ = return ()
 constraintsCheck cs@CompositeConstraints{} inner =
     ({-# SCC "constraintsCheck.flatten" #-}flattenVal inner) >>= flatConstraintsCheck cs
@@ -185,8 +185,8 @@ unifyCompositeAST u v =
 
 unify ::
     (IsTag tag, Monoid (Constraints tag)) =>
-    (TypeAST tag MetaTypeAST ->
-     TypeAST tag MetaTypeAST -> M.Infer s ()) ->
+    (AST tag MetaTypeAST ->
+     AST tag MetaTypeAST -> M.Infer s ()) ->
     MetaTypeAST tag -> MetaTypeAST tag -> M.Infer s ()
 unify f (MetaTypeAST u) (MetaTypeAST v) = f u v
 unify f (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST f u v
@@ -213,7 +213,7 @@ unify f (MetaTypeVar u) (MetaTypeVar v) =
                     f uAst vAst
 
 unifyUnbound ::
-    MetaVar tag -> Constraints tag -> TypeAST tag MetaTypeAST ->
+    MetaVar tag -> Constraints tag -> AST tag MetaTypeAST ->
     M.Infer s ()
 unifyUnbound pos cs ast =
     do
@@ -222,9 +222,9 @@ unifyUnbound pos cs ast =
 
 unifyVarAST ::
     (IsTag tag, Monoid (Constraints tag)) =>
-    (TypeAST tag MetaTypeAST ->
-     TypeAST tag MetaTypeAST -> M.Infer s ()) ->
-    TypeAST tag MetaTypeAST -> MetaVar tag -> M.Infer s ()
+    (AST tag MetaTypeAST ->
+     AST tag MetaTypeAST -> M.Infer s ()) ->
+    AST tag MetaTypeAST -> MetaVar tag -> M.Infer s ()
 unifyVarAST f uAst v =
     M.repr v >>= \case
     (_, Bound vAst) -> f uAst vAst

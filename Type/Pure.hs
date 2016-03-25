@@ -27,15 +27,15 @@ newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
 
 data T tag
-    = T (Type.TypeAST tag T)
+    = T (Type.AST tag T)
     -- HACK: When skolems are properly supported, they'll be qualified
-    -- vars inside the TypeAST itself
+    -- vars inside the Type.AST itself
     | TVar (TVarName tag)
 instance NFData (T tag) where
     rnf (T x) = rnf x
     rnf (TVar x) = rnf x
 
-instance Pretty (Type.TypeAST tag T) => Pretty (T tag) where
+instance Pretty (Type.AST tag T) => Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
     pPrintPrec _ _ (TVar name) = text "a" <> pPrint name
 

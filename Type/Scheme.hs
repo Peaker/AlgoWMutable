@@ -84,7 +84,7 @@ instance Pretty SchemeBinders where
         map pPrintTV (Map.toList rtvs) ++
         map pPrintTV (Map.toList stvs)
 
-instance Pretty (Type.TypeAST tag T) => Pretty (Scheme tag) where
+instance Pretty (Type.AST tag T) => Pretty (Scheme tag) where
     pPrint (Scheme binders typ)
         | nullBinders binders = pPrint typ
         | otherwise = pPrint binders <> "." <+?> pPrint typ
