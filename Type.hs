@@ -26,22 +26,17 @@ module Type
     , Identifier(..)
     , TId(..), TParamId(..)
     , Tag(..)
-    , CompositeTag(..), RecordT
+    , CompositeTag(..), RecordT, SumT
     , ASTTag(..)
     , Type
     , TypeAST(..), ntraverse
     , SchemeBinders(..)
-    , Scheme(..)
+    , Scheme(..), forAll
 
-    , T(..)
+    , T(..), TVarName(..)
 
     , recordType, compositeFrom, (~>), tInst
     , intType, boolType
-
-    , forAll
-    , test
-    , example1, example2, example3, example4, example5, example6, example7, example8, example9, example10, example11
-    , runTests
     ) where
 
 import           Control.DeepSeq (NFData(..))
@@ -66,14 +61,12 @@ import           MapPretty ()
 import           PrettyUtils ((<+?>))
 import           RefZone (Zone)
 import qualified RefZone as RefZone
-import           Text.PrettyPrint (vcat, hcat, punctuate, Doc, (<+>), (<>), text)
+import           Text.PrettyPrint (hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           Val (Val(..))
 import qualified Val as Val
 import           Val.Annotated (AV(..))
-import           Val.Pure (($$), (.$), ($.), ($=), ($+), ($-))
 import           Val.Pure (V(..))
-import qualified Val.Pure as V
 import           WriterT
 
 import           Prelude.Compat hiding (abs, tail)
@@ -252,9 +245,6 @@ intType = tInst "Int" Map.empty
 boolType :: T 'TypeT
 boolType = tInst "Bool" Map.empty
 
-infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
-infixType a b c = recordType [("l", a), ("r", b)] ~> c
-
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
@@ -376,6 +366,21 @@ instance Pretty (TypeAST tag T) => Pretty (Scheme tag) where
     pPrint (Scheme binders typ)
         | nullBinders binders = pPrint typ
         | otherwise = pPrint binders <> "." <+?> pPrint typ
+
+forAll ::
+    Int -> Int -> Int ->
+    ([T 'TypeT] -> [T RecordT] -> [T SumT] -> T tag) ->
+    Scheme tag
+forAll nTvs nRtvs nStvs mkType =
+    Scheme (SchemeBinders cTvs cRtvs cStvs) $
+    mkType (map TVar tvs) (map TVar rtvs) (map TVar stvs)
+    where
+        cTvs = Map.fromList [ (tv, mempty) | tv <- tvs ]
+        cRtvs = Map.fromList [ (tv, mempty) | tv <- rtvs ]
+        cStvs = Map.fromList [ (tv, mempty) | tv <- stvs ]
+        tvs = map TVarName [1..nTvs]
+        rtvs = map TVarName [nTvs+1..nTvs+nRtvs]
+        stvs = map TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
 
 data Scope = Scope
     { _scopeLocals :: Map Val.Var UnifiableType
@@ -1024,104 +1029,3 @@ inferScheme :: Scope -> V -> Either Err (AV UnifiableType, Scheme 'TypeT)
 inferScheme scope x =
     {-# SCC "inferScheme" #-}
     runInfer scope $ infer x >>= inline _2 generalize
-
-forAll ::
-    Int -> Int -> Int ->
-    ([T 'TypeT] -> [T RecordT] -> [T SumT] -> T tag) ->
-    Scheme tag
-forAll nTvs nRtvs nStvs mkType =
-    Scheme (SchemeBinders cTvs cRtvs cStvs) $
-    mkType (map TVar tvs) (map TVar rtvs) (map TVar stvs)
-    where
-        cTvs = Map.fromList [ (tv, mempty) | tv <- tvs ]
-        cRtvs = Map.fromList [ (tv, mempty) | tv <- rtvs ]
-        cStvs = Map.fromList [ (tv, mempty) | tv <- stvs ]
-        tvs = map TVarName [1..nTvs]
-        rtvs = map TVarName [nTvs+1..nTvs+nRtvs]
-        stvs = map TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
-
-globals :: Map Val.GlobalId (Scheme 'TypeT)
-globals =
-    mconcat
-    [ "+" ==> intInfix
-    , "-" ==> intInfix
-    ]
-    where
-        intInfix = forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
-        (==>) = Map.singleton
-
-test :: V -> Doc
-test x =
-    {-# SCC "test" #-}
-    pPrint x <+?>
-    case inferScheme (newScope globals) x of
-    Left err -> "causes type error:" <+> pPrint err
-    Right (_, typ) -> " :: " <+> pPrint typ
-
-
-example1 :: V
-example1 = V.lam "x" $ V.lam "y" $ V.var "x" $$ V.var "y" $$ V.var "y"
-
-example2 :: V
-example2 = V.lam "x" $ V.recVal [] & "x" $= V.var "x" & "y" $= V.lambda "x" id
-
-example3 :: V
-example3 = V.lam "x" $ (V.var "x" $. "y") $$ V.lambda "a" id
-
-example4 :: V
-example4 = V.lam "x" $ V.var "x" $$ V.var "x"
-
-example5 :: V
-example5 = V.lam "x" $ (V.var "x" $. "y") $$ (V.var "x" $. "y")
-
-example6 :: V
-example6 = V.recVal [("x", V.recVal []), ("y", V.recVal [])]
-
-example7 :: V
-example7 =
-    V.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
-
-example8 :: V
-example8 =
-    V.lambda "g" $ \g ->
-    V.lambda "f" $ \f ->
-    V.lambda "x" $ \x ->
-    g $$ (f $$ "Just" .$ x)
-      $$ (f $$ "Nothing" .$ V.recVal [])
-
-example9 :: V
-example9 =
-    V.cases
-    [ ("Nothing", V.lam "_" (V.litInt 0))
-    , ("Just", V.lambda "x" $ \x -> V.litInt 1 $+ x)
-    ]
-
-example10 :: V
-example10 =
-    V.lambda "f" $ \f ->
-    V.lambda "x" $ \x ->
-    (x $. "a")
-    $$ (f $$ x)
-    $$ (f $$ V.recVal [("a", V.hole)])
-
-example11 :: V
-example11 =
-    V.lambda "f" $ \f ->
-    V.lambda "x" $ \x ->
-    f $$ (x $. "a") $$ x
-
-runTests :: Doc
-runTests =
-    vcat $ map test
-    [ example1
-    , example2
-    , example3
-    , example4
-    , example5
-    , example6
-    , example7
-    , example8
-    , example9
-    , example10
-    , example11
-    ]
