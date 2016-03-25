@@ -25,7 +25,7 @@ import PrettyUtils ((<+?>))
 import Text.PrettyPrint (($+$), (<+>), (<>))
 import Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
-import Prelude.Compat hiding (abs, tail)
+import Prelude.Compat
 
 data Leaf
     = LVar Var

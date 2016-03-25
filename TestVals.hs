@@ -17,7 +17,10 @@ module TestVals
 import qualified Data.Map as Map
 -- -- import           Data.Monoid (Monoid(..), (<>))
 -- -- import qualified Data.Set as Set
-import           Type (T, (~>), ASTTag(..))
+import           Type (T, (~>))
+import           Type.Tag (ASTTag(..))
+import           Type.Infer.Scope (Scope)
+import qualified Type.Infer.Scope as Scope
 import qualified Type
 import qualified Val
 import qualified Val.Pure as V
@@ -25,7 +28,7 @@ import           Val.Pure (V, ($$), ($$:))
 
 import           Prelude.Compat
 
-type TType = T 'Type.TypeT
+type TType = T 'TypeT
 
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
 infixType a b c = Type.recordType [("l", a), ("r", b)] ~> c
@@ -175,8 +178,8 @@ infixArgs :: V -> V -> V
 infixArgs l r = V.recVal [("l", l), ("r", r)]
 
 -- env :: Loaded
-env :: Type.Scope
-env = Type.newScope $
+env :: Scope a
+env = Scope.newScope $
     -- Loaded
     -- { loadedGlobalTypes =
         Map.fromList

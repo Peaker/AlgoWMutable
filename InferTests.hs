@@ -14,13 +14,15 @@ import           MapPretty ()
 import           PrettyUtils ((<+?>))
 import           Text.PrettyPrint (vcat, Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type (T, (~>), recordType, intType, Scheme, forAll, inferScheme, newScope)
+import           Type (T, (~>), recordType, intType, Scheme, forAll)
+import           Type.Infer (inferScheme)
+import qualified Type.Infer.Scope as Scope
 import           Type.Tag (ASTTag(..))
 import qualified Val
 import           Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Val.Pure as V
 
-import           Prelude.Compat hiding (abs, tail)
+import           Prelude.Compat
 
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
 infixType a b c = recordType [("l", a), ("r", b)] ~> c
@@ -39,7 +41,7 @@ test :: V -> Doc
 test x =
     {-# SCC "test" #-}
     pPrint x <+?>
-    case inferScheme (newScope globals) x of
+    case inferScheme (Scope.newScope globals) x of
     Left err -> "causes type error:" <+> pPrint err
     Right (_, typ) -> " :: " <+> pPrint typ
 
