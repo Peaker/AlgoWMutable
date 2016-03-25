@@ -24,8 +24,8 @@ import qualified Data.Map as Map
 import           Data.Proxy (Proxy(..))
 import           Data.String (IsString)
 import           Identifier (Identifier(..), Tag(..))
-import           MapPretty ()
-import           PrettyUtils ((<+?>))
+import           Pretty.Map ()
+import           Pretty.Utils ((<+?>))
 import           Text.PrettyPrint ((<+>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 import           Type.Tag

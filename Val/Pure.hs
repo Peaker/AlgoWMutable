@@ -12,7 +12,7 @@ module Val.Pure
     ) where
 
 import Identifier (Tag(..))
-import MapPretty ()
+import Pretty.Map ()
 import Text.PrettyPrint.HughesPJClass (Pretty(..))
 import Val
 

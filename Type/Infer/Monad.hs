@@ -29,8 +29,8 @@ import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Identifier (Tag(..))
-import           MapPretty ()
-import           PrettyUtils (intercalate)
+import           Pretty.Map ()
+import           Pretty.Utils (intercalate)
 import qualified RefZone
 import           RefZone (Zone)
 import           Text.PrettyPrint (Doc, (<+>))

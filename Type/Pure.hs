@@ -15,7 +15,7 @@ import           Control.DeepSeq (NFData(..))
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Identifier (Tag(..))
-import           MapPretty ()
+import           Pretty.Map ()
 import           Text.PrettyPrint ((<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import qualified Type

@@ -10,8 +10,8 @@ module InferTests
 import           Control.Lens.Operators
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           MapPretty ()
-import           PrettyUtils ((<+?>))
+import           Pretty.Map ()
+import           Pretty.Utils ((<+?>))
 import           Text.PrettyPrint (vcat, Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import           Type.Pure (T, (~>), recordType, intType)

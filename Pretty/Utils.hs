@@ -1,4 +1,4 @@
-module PrettyUtils
+module Pretty.Utils
     ( (<+?>), intercalate
     ) where
 

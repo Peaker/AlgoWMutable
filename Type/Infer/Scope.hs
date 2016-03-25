@@ -10,7 +10,7 @@ module Type.Infer.Scope
 
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           MapPretty ()
+import           Pretty.Map ()
 import           Type.Tag (ASTTag(..))
 import           Type.Scheme (Scheme)
 import qualified Val

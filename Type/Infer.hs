@@ -12,7 +12,7 @@ import           Control.Lens.Tuple
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import           GHC.Exts (inline)
-import           MapPretty ()
+import           Pretty.Map ()
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import           Type (Type, AST(..))
 import           Type.Constraints (Constraints(..))

@@ -20,8 +20,8 @@ module Val
 import Control.DeepSeq (NFData(..))
 import Data.String (IsString)
 import Identifier
-import MapPretty ()
-import PrettyUtils ((<+?>))
+import Pretty.Map ()
+import Pretty.Utils ((<+?>))
 import Text.PrettyPrint (($+$), (<+>), (<>))
 import Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 

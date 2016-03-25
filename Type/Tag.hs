@@ -10,7 +10,7 @@ module Type.Tag
     ) where
 
 import           Data.Proxy (Proxy(..))
-import           MapPretty ()
+import           Pretty.Map ()
 
 import           Prelude.Compat
 

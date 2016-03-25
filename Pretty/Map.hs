@@ -1,6 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
 {-# OPTIONS -fno-warn-orphans #-}
-module MapPretty (pPrintWith) where
+module Pretty.Map (pPrintWith) where
 
 import Data.Map
 import Text.PrettyPrint.HughesPJClass

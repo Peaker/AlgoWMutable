@@ -14,8 +14,8 @@ import           Control.Lens.Operators
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import           MapPretty ()
-import           PrettyUtils ((<+?>), intercalate)
+import           Pretty.Map ()
+import           Pretty.Utils ((<+?>), intercalate)
 import           Text.PrettyPrint (Doc, (<>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 import qualified Type
