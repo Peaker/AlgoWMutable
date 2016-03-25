@@ -282,23 +282,23 @@ data IsBound tag bound
 data MetaVar tag = MetaVar
     { __unificationPosNames :: Set (TVarName tag)
       -- TODO: Remove names, use mutable bit/level instead
-    , __unificationPosRef :: RefZone.Ref (IsBound tag (UnifiableTypeAST tag))
+    , __unificationPosRef :: RefZone.Ref (IsBound tag (MetaTypeAST tag))
     }
 instance NFData (MetaVar tag) where rnf (MetaVar x y) = rnf x `seq` rnf y
 instance Pretty (MetaVar tag) where
     pPrint (MetaVar names _) = "?" <> pPrint (Set.toList names)
 
-type UnifiableType = UnifiableTypeAST 'TypeT
-type UnifiableComposite c = UnifiableTypeAST ('CompositeT c)
-data UnifiableTypeAST tag
-    = UnifiableTypeVar (MetaVar tag)
-    | UnifiableTypeAST (TypeAST tag UnifiableTypeAST)
-instance NFData (UnifiableTypeAST tag) where
-    rnf (UnifiableTypeVar x) = rnf x
-    rnf (UnifiableTypeAST x) = rnf x
-instance Pretty (TypeAST tag UnifiableTypeAST) => Pretty (UnifiableTypeAST tag) where
-    pPrint (UnifiableTypeVar pos) = pPrint pos
-    pPrint (UnifiableTypeAST t) = pPrint t
+type MetaType = MetaTypeAST 'TypeT
+type MetaComposite c = MetaTypeAST ('CompositeT c)
+data MetaTypeAST tag
+    = MetaTypeVar (MetaVar tag)
+    | MetaTypeAST (TypeAST tag MetaTypeAST)
+instance NFData (MetaTypeAST tag) where
+    rnf (MetaTypeVar x) = rnf x
+    rnf (MetaTypeAST x) = rnf x
+instance Pretty (TypeAST tag MetaTypeAST) => Pretty (MetaTypeAST tag) where
+    pPrint (MetaTypeVar pos) = pPrint pos
+    pPrint (MetaTypeAST t) = pPrint t
 
 Lens.makePrisms ''IsBound
 Lens.makeLenses ''MetaVar
@@ -383,7 +383,7 @@ forAll nTvs nRtvs nStvs mkType =
         stvs = map TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
 
 data Scope = Scope
-    { _scopeLocals :: Map Val.Var UnifiableType
+    { _scopeLocals :: Map Val.Var MetaType
     , _scopeGlobals :: Map Val.GlobalId (Scheme 'TypeT)
     }
 
@@ -394,7 +394,7 @@ emptyScope :: Scope
 emptyScope = Scope Map.empty Map.empty
 
 {-# INLINE insertLocal #-}
-insertLocal :: Val.Var -> UnifiableType -> Scope -> Scope
+insertLocal :: Val.Var -> MetaType -> Scope -> Scope
 insertLocal name typ (Scope locals globals) =
     Scope (Map.insert name typ locals) globals
 
@@ -495,7 +495,7 @@ writeRef ref val =
         zone <- askEnv <&> envZone
         RefZone.writeRef zone ref val & liftST
 
-writePos :: MetaVar tag -> IsBound tag (UnifiableTypeAST tag) -> Infer s ()
+writePos :: MetaVar tag -> IsBound tag (MetaTypeAST tag) -> Infer s ()
 writePos pos x = writeRef (__unificationPosRef pos) x
 
 {-# INLINE localScope #-}
@@ -507,7 +507,7 @@ askScope :: Infer s Scope
 askScope = askEnv <&> envScope
 
 {-# INLINE lookupLocal #-}
-lookupLocal :: Val.Var -> Infer s (Maybe UnifiableType)
+lookupLocal :: Val.Var -> Infer s (Maybe MetaType)
 lookupLocal str = askScope <&> _scopeLocals <&> Map.lookup str
 
 {-# INLINE lookupGlobal #-}
@@ -536,10 +536,10 @@ freshPos cs =
         MetaVar (Set.singleton tvarName) ref & return
 
 {-# INLINE freshTVar #-}
-freshTVar :: Constraints tag -> Infer s (UnifiableTypeAST tag)
-freshTVar cs = freshPos cs <&> UnifiableTypeVar
+freshTVar :: Constraints tag -> Infer s (MetaTypeAST tag)
+freshTVar cs = freshPos cs <&> MetaTypeVar
 
-instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (UnifiableTypeAST tag)
+instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (MetaTypeAST tag)
 instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
     {-# SCC "instantiate" #-}
     do
@@ -547,12 +547,12 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
         recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshTVar recordVars
         sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshTVar sumVars
         let go ::
-                Map (TVarName t) (UnifiableTypeAST t) ->
-                T t -> Infer s (UnifiableTypeAST t)
+                Map (TVarName t) (MetaTypeAST t) ->
+                T t -> Infer s (MetaTypeAST t)
             go binders (TVar tvarName) = return (binders Map.! tvarName)
             go _ (T typeAST) =
                 ntraverse (go typeUFs) (go recordUFs) (go sumUFs) typeAST
-                <&> UnifiableTypeAST
+                <&> MetaTypeAST
         {-# SCC "instantiate.go" #-}typ & case tagRefl :: ASTTagEquality tag of
             IsTypeT -> go typeUFs
             IsCompositeT IsRecordC -> go recordUFs
@@ -560,19 +560,19 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
 
 repr ::
     MetaVar tag ->
-    Infer s (MetaVar tag, IsBound tag (TypeAST tag UnifiableTypeAST))
+    Infer s (MetaVar tag, IsBound tag (TypeAST tag MetaTypeAST))
 repr x =
     do
         zone <- askEnv <&> envZone
         let go pos@(MetaVar _ ref) =
                 RefZone.readRef zone ref >>= \case
                 Unbound uCs -> return (pos, Unbound uCs)
-                Bound (UnifiableTypeAST ast) -> return (pos, Bound ast)
-                Bound (UnifiableTypeVar innerPos) ->
+                Bound (MetaTypeAST ast) -> return (pos, Bound ast)
+                Bound (MetaTypeVar innerPos) ->
                     do
                         res <- go innerPos
                         -- path compression:
-                        RefZone.writeRef zone ref (snd res <&> UnifiableTypeAST)
+                        RefZone.writeRef zone ref (snd res <&> MetaTypeAST)
                         return res
         liftST $ go x
 
@@ -587,11 +587,11 @@ schemeBindersSingleton tvName cs =
 
 deref ::
     forall s tag. IsTag tag =>
-    Set Int -> UnifiableTypeAST tag -> WriterT SchemeBinders (Infer s) (T tag)
+    Set Int -> MetaTypeAST tag -> WriterT SchemeBinders (Infer s) (T tag)
 deref visited = \case
-    UnifiableTypeAST ast ->
+    MetaTypeAST ast ->
         ast & ntraverse (deref visited) (deref visited) (deref visited) <&> T
-    UnifiableTypeVar (MetaVar names tvRef)
+    MetaTypeVar (MetaVar names tvRef)
         | _tVarName tvName `Set.member` visited ->
               throwError InfiniteType & lift
         | otherwise ->
@@ -601,12 +601,12 @@ deref visited = \case
                 do
                     tell $ schemeBindersSingleton tvName cs
                     return $ TVar tvName
-            Bound unifiable ->
-                deref (Set.insert (_tVarName tvName) visited) unifiable
+            Bound meta ->
+                deref (Set.insert (_tVarName tvName) visited) meta
         where
             tvName = Set.findMin names
 
-generalize :: UnifiableType -> Infer s (Scheme 'TypeT)
+generalize :: MetaType -> Infer s (Scheme 'TypeT)
 generalize t =
     {-# SCC "generalize" #-}
     deref Set.empty t
@@ -618,7 +618,7 @@ data CompositeTail c
     | CompositeTailOpen (MetaVar ('CompositeT c)) (Constraints ('CompositeT c))
     -- TODO(Review): The "Constraints" cache above is necessary? Can it become stale?
 
-type CompositeFields = Map Tag UnifiableType
+type CompositeFields = Map Tag MetaType
 
 data FlatComposite c = FlatComposite
     { _fcFields :: CompositeFields
@@ -627,28 +627,28 @@ data FlatComposite c = FlatComposite
 
 Lens.makeLenses ''FlatComposite
 
-flattenVal :: Composite c UnifiableTypeAST -> Infer s (FlatComposite c)
+flattenVal :: Composite c MetaTypeAST -> Infer s (FlatComposite c)
 flattenVal TEmptyComposite =
     return $ FlatComposite Map.empty CompositeTailClosed
 flattenVal (TCompositeExtend n t r) =
     flatten r <&> fcFields . Lens.at n ?~ t
 
-flatten :: UnifiableComposite c -> Infer s (FlatComposite c)
-flatten (UnifiableTypeAST ast) = flattenVal ast
-flatten (UnifiableTypeVar pos) =
+flatten :: MetaComposite c -> Infer s (FlatComposite c)
+flatten (MetaTypeAST ast) = flattenVal ast
+flatten (MetaTypeVar pos) =
     repr pos >>= \case
     (_, Unbound cs) -> return $ FlatComposite Map.empty $ CompositeTailOpen pos cs
     (_, Bound ast) -> flattenVal ast
 
-unflatten :: IsCompositeTag c => FlatComposite c -> UnifiableComposite c
+unflatten :: IsCompositeTag c => FlatComposite c -> MetaComposite c
 unflatten (FlatComposite fields tail) =
     {-# SCC "unflatten" #-}Map.toList fields & go
     where
         go [] = case tail of
-            CompositeTailClosed -> UnifiableTypeAST TEmptyComposite
-            CompositeTailOpen pos _ -> UnifiableTypeVar pos
+            CompositeTailClosed -> MetaTypeAST TEmptyComposite
+            CompositeTailOpen pos _ -> MetaTypeVar pos
         go ((name, typ):fs) =
-            go fs & TCompositeExtend name typ & UnifiableTypeAST
+            go fs & TCompositeExtend name typ & MetaTypeAST
 
 prettyFieldNames :: Map Tag a -> Doc
 prettyFieldNames = intercalate " " . map pPrint . Map.keys
@@ -677,7 +677,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
         FlatComposite innerFields innerTail = flatComposite
 
 constraintsCheck ::
-    Constraints tag -> TypeAST tag UnifiableTypeAST -> Infer s ()
+    Constraints tag -> TypeAST tag MetaTypeAST -> Infer s ()
 constraintsCheck TypeConstraints _ = return ()
 constraintsCheck cs@CompositeConstraints{} inner =
     ({-# SCC "constraintsCheck.flatten" #-}flattenVal inner) >>= flatConstraintsCheck cs
@@ -726,7 +726,7 @@ unifyCompositesOpenOpen (uPos, uCs, uFields) (vPos, vCs, vFields) =
         uniqueVFields = vFields `Map.difference` uFields
 
 unifyComposite ::
-    IsCompositeTag c => UnifiableComposite c -> UnifiableComposite c ->
+    IsCompositeTag c => MetaComposite c -> MetaComposite c ->
     Infer s ()
 unifyComposite = {-# SCC "unifyComposite" #-}unify unifyCompositeAST
 
@@ -734,8 +734,8 @@ unifyComposite = {-# SCC "unifyComposite" #-}unify unifyCompositeAST
 -- via flatten, so no need for unify's read of these:
 unifyCompositeAST ::
     IsCompositeTag c =>
-    Composite c UnifiableTypeAST ->
-    Composite c UnifiableTypeAST ->
+    Composite c MetaTypeAST ->
+    Composite c MetaTypeAST ->
     Infer s ()
 unifyCompositeAST TEmptyComposite TEmptyComposite = return ()
 unifyCompositeAST (TCompositeExtend un ut ur) (TCompositeExtend vn vt vr)
@@ -763,20 +763,20 @@ unifyCompositeAST u v =
 
 unify ::
     (IsTag tag, Monoid (Constraints tag)) =>
-    (TypeAST tag UnifiableTypeAST ->
-     TypeAST tag UnifiableTypeAST -> Infer s ()) ->
-    UnifiableTypeAST tag -> UnifiableTypeAST tag -> Infer s ()
-unify f (UnifiableTypeAST u) (UnifiableTypeAST v) = f u v
-unify f (UnifiableTypeAST u) (UnifiableTypeVar v) = unifyVarAST f u v
-unify f (UnifiableTypeVar u) (UnifiableTypeAST v) = unifyVarAST f v u
-unify f (UnifiableTypeVar u) (UnifiableTypeVar v) =
+    (TypeAST tag MetaTypeAST ->
+     TypeAST tag MetaTypeAST -> Infer s ()) ->
+    MetaTypeAST tag -> MetaTypeAST tag -> Infer s ()
+unify f (MetaTypeAST u) (MetaTypeAST v) = f u v
+unify f (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST f u v
+unify f (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST f v u
+unify f (MetaTypeVar u) (MetaTypeVar v) =
     do
         (uPos@(MetaVar _ uRef), ur) <- repr u
         (vPos@(MetaVar _ vRef), vr) <- repr v
         -- TODO: Choose which to link into which weight/level-wise
         let link a b =
                 -- TODO: Update the "names"? They should die!
-                writePos a $ Bound $ UnifiableTypeVar b
+                writePos a $ Bound $ MetaTypeVar b
         unless (uRef == vRef) $
             case (ur, vr) of
             (Unbound uCs, Unbound vCs) ->
@@ -791,25 +791,25 @@ unify f (UnifiableTypeVar u) (UnifiableTypeVar v) =
                     f uAst vAst
 
 unifyUnbound ::
-    MetaVar tag -> Constraints tag -> TypeAST tag UnifiableTypeAST ->
+    MetaVar tag -> Constraints tag -> TypeAST tag MetaTypeAST ->
     Infer s ()
 unifyUnbound pos cs ast =
     do
         {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
-        writePos pos $ Bound (UnifiableTypeAST ast)
+        writePos pos $ Bound (MetaTypeAST ast)
 
 unifyVarAST ::
     (IsTag tag, Monoid (Constraints tag)) =>
-    (TypeAST tag UnifiableTypeAST ->
-     TypeAST tag UnifiableTypeAST -> Infer s ()) ->
-    TypeAST tag UnifiableTypeAST -> MetaVar tag -> Infer s ()
+    (TypeAST tag MetaTypeAST ->
+     TypeAST tag MetaTypeAST -> Infer s ()) ->
+    TypeAST tag MetaTypeAST -> MetaVar tag -> Infer s ()
 unifyVarAST f uAst v =
     repr v >>= \case
     (_, Bound vAst) -> f uAst vAst
     (vPos, Unbound vCs) -> unifyUnbound vPos vCs uAst
 
 unifyTInstParams ::
-    Err -> Map TParamId UnifiableType -> Map TParamId UnifiableType -> Infer s ()
+    Err -> Map TParamId MetaType -> Map TParamId MetaType -> Infer s ()
 unifyTInstParams err uParams vParams
     | uSize /= vSize = throwError err
     | uSize == 0 = return ()
@@ -826,10 +826,10 @@ unifyMatch expected vTyp prism =
     Nothing -> throwError $ DoesNotUnify expected (pPrint vTyp)
     Just vcontent -> return vcontent
 
-unifyType :: UnifiableType -> UnifiableType -> Infer s ()
+unifyType :: MetaType -> MetaType -> Infer s ()
 unifyType = {-# SCC "unifyType" #-}unify unifyTypeAST
 
-unifyTypeAST :: Type UnifiableTypeAST -> Type UnifiableTypeAST -> Infer s ()
+unifyTypeAST :: Type MetaTypeAST -> Type MetaTypeAST -> Infer s ()
 unifyTypeAST uTyp@(TInst uName uParams) vTyp =
     case vTyp of
     TInst vName vParams | uName == vName ->
@@ -855,9 +855,9 @@ unifyTypeAST (TFun uArg uRes) vTyp =
 int :: TypeAST 'TypeT ast
 int = TInst "Int" Map.empty
 
-type InferResult = (AV UnifiableType, UnifiableType)
+type InferResult = (AV MetaType, MetaType)
 
-inferRes :: Val (AV UnifiableType) -> UnifiableType -> (AV UnifiableType, UnifiableType)
+inferRes :: Val (AV MetaType) -> MetaType -> (AV MetaType, MetaType)
 inferRes val typ = (AV typ val, typ)
 
 inferLeaf :: Val.Leaf -> Infer s InferResult
@@ -866,13 +866,13 @@ inferLeaf leaf =
     case leaf of
     Val.LEmptyRecord ->
         {-# SCC "inferEmptyRecord" #-}
-        UnifiableTypeAST TEmptyComposite & TRecord & UnifiableTypeAST & return
+        MetaTypeAST TEmptyComposite & TRecord & MetaTypeAST & return
     Val.LAbsurd ->
         {-# SCC "inferAbsurd" #-}
         do
             res <- freshTVar TypeConstraints
-            let emptySum = UnifiableTypeAST TEmptyComposite & TSum & UnifiableTypeAST
-            TFun emptySum res & UnifiableTypeAST & return
+            let emptySum = MetaTypeAST TEmptyComposite & TSum & MetaTypeAST
+            TFun emptySum res & MetaTypeAST & return
     Val.LGlobal n ->
         {-# SCC "inferGlobal" #-}
         lookupGlobal n >>= \case
@@ -880,7 +880,7 @@ inferLeaf leaf =
         Nothing -> throwError $ GlobalNotInScope n
     Val.LInt _ ->
         {-# SCC "inferInt" #-}
-        UnifiableTypeAST int & return
+        MetaTypeAST int & return
     Val.LHole ->
         {-# SCC "inferHole" #-}
         freshTVar TypeConstraints
@@ -897,7 +897,7 @@ inferLam (Val.Abs n body) =
     do
         nType <- freshTVar TypeConstraints
         (body', resType) <- infer body & localScope (insertLocal n nType)
-        TFun nType resType & UnifiableTypeAST
+        TFun nType resType & MetaTypeAST
             & inferRes (Val.BLam (Val.Abs n body')) & return
 
 inferApp :: Val.App V -> Infer s InferResult
@@ -908,16 +908,16 @@ inferApp (Val.App fun arg) =
         (arg', argTyp) <- infer arg
         resTyp <-
             case funTyp of
-            UnifiableTypeVar pos ->
+            MetaTypeVar pos ->
                 do
                     resTyp <- freshTVar TypeConstraints
                     unifyVarAST unifyTypeAST (TFun argTyp resTyp) pos
                     return resTyp
-            UnifiableTypeAST (TFun paramTyp resTyp) ->
+            MetaTypeAST (TFun paramTyp resTyp) ->
                 do
                     unifyType paramTyp argTyp
                     return resTyp
-            UnifiableTypeAST t ->
+            MetaTypeAST t ->
                 DoesNotUnify (pPrint t) "Function type" & throwError
         inferRes (Val.BApp (Val.App fun' arg')) resTyp & return
 
@@ -928,7 +928,7 @@ inferRecExtend (Val.RecExtend name val rest) =
         (rest', restTyp) <- infer rest
         restRecordTyp <-
             case restTyp of
-            UnifiableTypeVar pos ->
+            MetaTypeVar pos ->
                 do
                     unknownRestFields <-
                         freshTVar $ CompositeConstraints $
@@ -936,21 +936,21 @@ inferRecExtend (Val.RecExtend name val rest) =
                     -- TODO (Optimization): pos known to be unbound
                     unifyVarAST unifyTypeAST (TRecord unknownRestFields) pos
                     return unknownRestFields
-            UnifiableTypeAST (TRecord restRecordTyp) ->
+            MetaTypeAST (TRecord restRecordTyp) ->
                 do
                     propagateConstraint restRecordTyp
                     return restRecordTyp
-            UnifiableTypeAST t ->
+            MetaTypeAST t ->
                 DoesNotUnify (pPrint t) "Record type" & throwError
         (val', valTyp) <- infer val
         TCompositeExtend name valTyp restRecordTyp
-            & UnifiableTypeAST
-            & TRecord & UnifiableTypeAST
+            & MetaTypeAST
+            & TRecord & MetaTypeAST
             & inferRes (Val.BRecExtend (Val.RecExtend name val' rest'))
             & return
     where
-        propagateConstraint (UnifiableTypeAST x) = propagateConstraintBound x
-        propagateConstraint (UnifiableTypeVar pos) =
+        propagateConstraint (MetaTypeAST x) = propagateConstraintBound x
+        propagateConstraint (MetaTypeVar pos) =
             repr pos >>= \case
             (_, Bound ast) -> propagateConstraintBound ast
             (vPos, Unbound (CompositeConstraints cs)) ->
@@ -966,7 +966,7 @@ inferCase (Val.Case name handler restHandler) =
     {-# SCC "inferCase" #-}
     do
         resType <- freshTVar TypeConstraints
-        let toResType x = TFun x resType & UnifiableTypeAST
+        let toResType x = TFun x resType & MetaTypeAST
 
         fieldType <- freshTVar TypeConstraints
 
@@ -978,11 +978,11 @@ inferCase (Val.Case name handler restHandler) =
         let expectedHandlerTyp = toResType fieldType
         unifyType expectedHandlerTyp handlerTyp
 
-        let expectedRestHandlerType = TSum sumTail & UnifiableTypeAST & toResType
+        let expectedRestHandlerType = TSum sumTail & MetaTypeAST & toResType
         unifyType expectedRestHandlerType restHandlerTyp
 
         TCompositeExtend name fieldType sumTail
-            & UnifiableTypeAST & TSum & UnifiableTypeAST & toResType
+            & MetaTypeAST & TSum & MetaTypeAST & toResType
             & inferRes (Val.BCase (Val.Case name handler' restHandler'))
             & return
 
@@ -995,8 +995,8 @@ inferGetField (Val.GetField val name) =
         expectedValTyp <-
             freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name resTyp
-            <&> UnifiableTypeAST
-            <&> TRecord <&> UnifiableTypeAST
+            <&> MetaTypeAST
+            <&> TRecord <&> MetaTypeAST
         unifyType expectedValTyp valTyp
         inferRes (Val.BGetField (Val.GetField val' name)) resTyp & return
 
@@ -1007,8 +1007,8 @@ inferInject (Val.Inject name val) =
         (val', valTyp) <- infer val
         freshTVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name valTyp
-            <&> UnifiableTypeAST
-            <&> TSum <&> UnifiableTypeAST
+            <&> MetaTypeAST
+            <&> TSum <&> MetaTypeAST
             <&> inferRes (Val.BInject (Val.Inject name val'))
 
 infer :: V -> Infer s InferResult
@@ -1023,7 +1023,7 @@ infer (V v) =
     Val.BInject x -> inferInject x
     Val.BCase x -> inferCase x
 
-inferScheme :: Scope -> V -> Either Err (AV UnifiableType, Scheme 'TypeT)
+inferScheme :: Scope -> V -> Either Err (AV MetaType, Scheme 'TypeT)
 inferScheme scope x =
     {-# SCC "inferScheme" #-}
     runInfer scope $ infer x >>= inline _2 generalize
