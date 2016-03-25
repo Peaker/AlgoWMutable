@@ -163,17 +163,17 @@ ntraverse ::
     (ast RecordT -> f (ast' RecordT)) ->
     (ast SumT -> f (ast' SumT)) ->
     TypeAST tag ast -> f (TypeAST tag ast')
-ntraverse typ reco su = \case
-    TFun a b -> TFun <$> typ a <*> typ b
-    TInst n params -> TInst n <$> traverse typ params
-    TRecord r -> TRecord <$> reco r
-    TSum s -> TSum <$> su s
+ntraverse onTypes onRecords onSums = \case
+    TFun a b -> TFun <$> onTypes a <*> onTypes b
+    TInst n params -> TInst n <$> traverse onTypes params
+    TRecord r -> TRecord <$> onRecords r
+    TSum s -> TSum <$> onSums s
     TEmptyComposite -> pure TEmptyComposite
     TCompositeExtend n t (r :: ast ('CompositeT c)) ->
-        TCompositeExtend n <$> typ t <*>
+        TCompositeExtend n <$> onTypes t <*>
         case compositeTagRefl :: CompositeTagEquality c of
-        IsRecordC -> reco r
-        IsSumC -> su r
+        IsRecordC -> onRecords r
+        IsSumC -> onSums r
 
 _TFun :: Lens.Prism' (TypeAST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
@@ -238,7 +238,6 @@ instance (IsCompositeTag c,
             maybeParens (prec > 1) $
             "{" <+> pPrint n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+?>
             text [compositeChar (Proxy :: Proxy c)] <+> pPrintPrec level 1 r
-
 
 data Leaf
     = LVar Var
