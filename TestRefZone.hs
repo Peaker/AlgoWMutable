@@ -3,8 +3,9 @@ module TestRefZone where
 
 import Control.Monad
 import Control.Monad.ST
-import Prelude.Compat
 import RefZone
+
+import Prelude.Compat
 
 main :: IO ()
 main = print ok

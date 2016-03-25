@@ -1,6 +1,4 @@
 {-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
-import Prelude.Compat
-
 -- import Control.Exception (evaluate)
 -- import Control.Lens (folded)
 -- import Control.Lens.Operators
@@ -15,6 +13,8 @@ import Text.PrettyPrint.HughesPJClass (Pretty(..))
 import TestVals
 import Type (inferScheme)
 import Val.Pure (V(..))
+
+import Prelude.Compat
 
 benchInfer :: V -> Benchmarkable
 benchInfer =

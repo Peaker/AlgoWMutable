@@ -13,8 +13,6 @@ module TestVals
     -- )
     where
 
-import           Prelude.Compat
-
 -- -- import           Control.Lens.Operators
 import qualified Data.Map as Map
 -- -- import           Data.Monoid (Monoid(..), (<>))
@@ -24,6 +22,8 @@ import qualified Type as Type
 import qualified Val as Val
 import qualified Val.Pure as V
 import           Val.Pure (V, ($$), ($$:))
+
+import           Prelude.Compat
 
 type TType = T 'Type.TypeT
 

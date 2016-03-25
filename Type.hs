@@ -44,8 +44,6 @@ module Type
     , runTests
     ) where
 
-import           Prelude.Compat hiding (abs, tail)
-
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
@@ -76,6 +74,8 @@ import           Val.Pure (($$), (.$), ($.), ($=), ($+), ($-))
 import           Val.Pure (V(..))
 import qualified Val.Pure as V
 import           WriterT
+
+import           Prelude.Compat hiding (abs, tail)
 
 data CompositeTag = RecordC | SumC
 type RecordT = 'CompositeT 'RecordC

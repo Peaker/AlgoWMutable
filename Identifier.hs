@@ -5,14 +5,14 @@ module Identifier
     , Tag(..)
     ) where
 
-import           Prelude.Compat
-
 import           Control.DeepSeq (NFData(..))
 import           Data.String (IsString)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Text.PrettyPrint (text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
+
+import           Prelude.Compat
 
 newtype Identifier = Identifier { _identifierText :: Text }
     deriving (Eq, Ord, Show, NFData, IsString)

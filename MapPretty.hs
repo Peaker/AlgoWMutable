@@ -2,10 +2,10 @@
 {-# OPTIONS -fno-warn-orphans #-}
 module MapPretty (pPrintWith) where
 
-import Prelude.Compat
-
 import Data.Map
 import Text.PrettyPrint.HughesPJClass
+
+import Prelude.Compat
 
 instance (Pretty k, Pretty v) => Pretty (Map k v) where
     pPrint = pPrintWith pPrint pPrint

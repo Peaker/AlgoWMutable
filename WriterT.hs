@@ -6,9 +6,9 @@ module WriterT
     , listen
     ) where
 
-import Prelude.Compat
-
 import Control.Monad.State.Strict
+
+import Prelude.Compat
 
 newtype WriterT w m a = WriterT { unWriterT :: StateT w m a }
     deriving (Functor, Applicative, Monad, MonadTrans)
