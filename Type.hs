@@ -25,9 +25,6 @@ module Type
 
     , Identifier(..)
     , TId(..), TParamId(..)
-    , Tag(..)
-    , CompositeTag(..), RecordT, SumT
-    , ASTTag(..)
     , Type
     , TypeAST(..), ntraverse
     , SchemeBinders(..)
@@ -59,45 +56,22 @@ import           GHC.Exts (inline)
 import           Identifier (Identifier(..), Tag(..))
 import           MapPretty ()
 import           PrettyUtils ((<+?>))
-import           RefZone (Zone)
 import qualified RefZone
+import           RefZone (Zone)
 import           Text.PrettyPrint (hcat, punctuate, Doc, (<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
-import           Val (Val(..))
+import           Type.Constraints (Constraints(..))
+import           Type.Tag
+    ( ASTTag(..), IsTag(..), ASTTagEquality(..)
+    , IsCompositeTag(..), CompositeTagEquality(..)
+    , RecordT, SumT )
 import qualified Val
+import           Val (Val(..))
 import           Val.Annotated (AV(..))
 import           Val.Pure (V(..))
 import           WriterT
 
 import           Prelude.Compat hiding (abs, tail)
-
-data CompositeTag = RecordC | SumC
-type RecordT = 'CompositeT 'RecordC
-type SumT = 'CompositeT 'SumC
-data ASTTag = TypeT | CompositeT CompositeTag
-
-data CompositeTagEquality c where
-    IsRecordC :: CompositeTagEquality 'RecordC
-    IsSumC :: CompositeTagEquality 'SumC
-
-data ASTTagEquality t where
-    IsTypeT :: ASTTagEquality 'TypeT
-    IsCompositeT :: !(CompositeTagEquality c) -> ASTTagEquality ('CompositeT c)
-
-class IsCompositeTag t where
-    compositeTagRefl :: CompositeTagEquality t
-    compositeChar :: Proxy t -> Char
-instance IsCompositeTag 'RecordC where
-    compositeTagRefl = IsRecordC
-    compositeChar _ = '*'
-instance IsCompositeTag 'SumC where
-    compositeTagRefl = IsSumC
-    compositeChar _ = '+'
-
-class IsTag t where tagRefl :: ASTTagEquality t
-instance IsTag 'TypeT where tagRefl = IsTypeT
-instance IsCompositeTag c => IsTag ('CompositeT c) where
-    tagRefl = IsCompositeT compositeTagRefl
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, Pretty, NFData)
@@ -247,35 +221,6 @@ boolType = tInst "Bool" Map.empty
 
 int :: Type ast
 int = TInst "Int" Map.empty
-
-data Constraints tag where
-    TypeConstraints :: Constraints 'TypeT
-    -- forbidden field set:
-    CompositeConstraints :: !(Set Tag) -> Constraints ('CompositeT c)
-
-instance Eq (Constraints tag) where
-    (==) a b =
-        case a of
-        TypeConstraints ->
-            case b :: Constraints 'TypeT of
-            TypeConstraints -> True
-        CompositeConstraints x ->
-            -- GADT exhaustiveness checking, ugh!
-            case b :: tag ~ 'CompositeT c => Constraints ('CompositeT c) of
-            CompositeConstraints y -> x == y
-
-instance NFData (Constraints tag) where
-    rnf TypeConstraints = ()
-    rnf (CompositeConstraints cs) = rnf cs
-
-instance Monoid (Constraints 'TypeT) where
-    mempty = TypeConstraints
-    mappend _ _ = TypeConstraints
-
-instance Monoid (Constraints ('CompositeT c)) where
-    mempty = CompositeConstraints mempty
-    mappend (CompositeConstraints x) (CompositeConstraints y) =
-        CompositeConstraints (x `mappend` y)
 
 data IsBound tag bound
     = Unbound (Constraints tag)

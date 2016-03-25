@@ -14,7 +14,8 @@ import           MapPretty ()
 import           PrettyUtils ((<+?>))
 import           Text.PrettyPrint (vcat, Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type
+import           Type (T, (~>), recordType, intType, Scheme, forAll, inferScheme, newScope)
+import           Type.Tag (ASTTag(..))
 import qualified Val
 import           Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Val.Pure as V
