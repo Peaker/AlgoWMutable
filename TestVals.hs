@@ -34,9 +34,6 @@ type TType = T 'TypeT
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
 infixType a b c = T.recordType [("l", a), ("r", b)] ~> c
 
--- TODO: $$ to be type-classed for TApp vs BApp
--- TODO: TCon "->" instead of TFun
-
 eLet :: Val.Var -> V -> (V -> V) -> V
 eLet name val mkBody = V.lam name body $$ val
     where

@@ -80,8 +80,6 @@ data Env s = Env
 newtype Infer s a = Infer
     { unInfer :: Env s -> ST s (Either Err a)
     } deriving (Functor)
--- TODO: Since Infer is completely equivalent to a single ReaderT
--- transform, it is likely that ReaderT will be no slower, bench it
 instance Applicative (Infer s) where
     {-# INLINE pure #-}
     pure x = Infer $ \_ -> pure (Right x)
