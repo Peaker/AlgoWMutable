@@ -144,7 +144,10 @@ data TypeAST tag ast where
 type Type = TypeAST 'TypeT
 type Composite c = TypeAST ('CompositeT c)
 
-instance (NFData (ast 'TypeT), NFData (ast RecordT), NFData (ast SumT), NFData (ast tag)) =>
+instance (NFData (ast 'TypeT),
+          NFData (ast RecordT),
+          NFData (ast SumT),
+          NFData (ast tag)) =>
          NFData (TypeAST tag ast) where
     rnf (TFun x y) = rnf x `seq` rnf y
     rnf (TInst n params) = rnf n `seq` rnf params
@@ -212,7 +215,10 @@ _TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
     TCompositeExtend n t r -> Just (n, t, r)
     _ -> Nothing
 
-instance (Pretty (ast 'TypeT), Pretty (ast RecordT), Pretty (ast SumT)) => Pretty (Type ast) where
+instance (Pretty (ast 'TypeT),
+          Pretty (ast RecordT),
+          Pretty (ast SumT)) =>
+         Pretty (Type ast) where
     pPrintPrec level prec ast =
         case ast of
         TFun a b ->
@@ -228,7 +234,10 @@ infixr 2 <+?>
 (<+?>) :: Doc -> Doc -> Doc
 x <+?> y = fcat [x, " " <> y]
 
-instance (IsCompositeTag c, Pretty (ast 'TypeT), Pretty (ast ('CompositeT c))) => Pretty (Composite c ast) where
+instance (IsCompositeTag c,
+          Pretty (ast 'TypeT),
+          Pretty (ast ('CompositeT c))) =>
+         Pretty (Composite c ast) where
     pPrintPrec level prec ast =
         case ast of
         TEmptyComposite -> "{}"
