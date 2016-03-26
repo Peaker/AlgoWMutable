@@ -84,31 +84,37 @@ ntraverse onTypes onRecords onSums = \case
         IsRecordC -> onRecords r
         IsSumC -> onSums r
 
+{-# INLINE _TFun #-}
 _TFun :: Lens.Prism' (AST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
     _ -> Nothing
 
+{-# INLINE _TInst #-}
 _TInst :: Lens.Prism' (Type ast) (TId, Map TParamId (ast 'TypeT))
 _TInst = Lens.prism' (uncurry TInst) $ \case
     TInst n p -> Just (n, p)
     _ -> Nothing
 
+{-# INLINE _TRecord #-}
 _TRecord :: Lens.Prism' (Type ast) (ast RecordT)
 _TRecord = Lens.prism' TRecord $ \case
     TRecord n -> Just n
     _ -> Nothing
 
+{-# INLINE _TSum #-}
 _TSum :: Lens.Prism' (Type ast) (ast SumT)
 _TSum = Lens.prism' TSum $ \case
     TSum n -> Just n
     _ -> Nothing
 
+{-# INLINE _TEmptyComposite #-}
 _TEmptyComposite :: IsCompositeTag c => Lens.Prism' (AST ('CompositeT c) ast) ()
 _TEmptyComposite = Lens.prism' (\() -> TEmptyComposite) $ \case
     TEmptyComposite -> Just ()
     _ -> Nothing
 
+{-# INLINE _TCompositeExtend #-}
 _TCompositeExtend ::
     IsCompositeTag c =>
     Lens.Prism' (AST ('CompositeT c) ast)
