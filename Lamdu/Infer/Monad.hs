@@ -7,7 +7,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
-module Type.Infer.Monad
+module Lamdu.Infer.Monad
     ( Infer
     , Err(..), throwError
     , runInfer
@@ -23,36 +23,36 @@ module Type.Infer.Monad
 import           Control.Lens.Operators
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
+import           Control.Monad.Trans.WriterT (WriterT, runWriterT, tell)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.RefZone (Zone)
+import qualified Data.RefZone as RefZone
 import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
-import           Identifier (Tag(..))
-import           Pretty.Map ()
-import           Pretty.Utils (intercalate)
-import qualified RefZone
-import           RefZone (Zone)
-import           Text.PrettyPrint (Doc, (<+>))
-import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import qualified Type
-import           Type.Scheme (Scheme(..), SchemeBinders(..))
-import           Type.Pure (T(..), TVarName(..))
-import           Type.Constraints (Constraints(..))
-import           Type.Infer.Scope (Scope)
-import qualified Type.Infer.Scope as Scope
-import           Type.Meta (MetaType, MetaVar(..), MetaTypeAST(..), IsBound(..))
-import           Type.Tag
+import           Lamdu.Expr.Identifier (Tag(..))
+import qualified Lamdu.Expr.Type as Type
+import           Lamdu.Expr.Type.Constraints (Constraints(..))
+import           Lamdu.Expr.Type.Meta (MetaType, MetaVar(..), MetaTypeAST(..), IsBound(..))
+import           Lamdu.Expr.Type.Pure (T(..), TVarName(..))
+import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
+import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), ASTTagEquality(..), IsTag(..)
     , CompositeTagEquality(..) )
-import qualified Val
-import           WriterT (WriterT, runWriterT, tell)
+import           Lamdu.Expr.Val (Var)
+import           Lamdu.Infer.Scope (Scope)
+import qualified Lamdu.Infer.Scope as Scope
+import           Pretty.Map ()
+import           Pretty.Utils (intercalate)
+import           Text.PrettyPrint (Doc, (<+>))
+import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
 data Err
     = DoesNotUnify Doc Doc
-    | VarNotInScope Val.Var
+    | VarNotInScope Var
     | InfiniteType
     | DuplicateFields [Tag]
     deriving (Show)
@@ -153,11 +153,11 @@ askScope :: Infer s (Scope MetaType)
 askScope = askEnv <&> envScope
 
 {-# INLINE lookupLocal #-}
-lookupLocal :: Val.Var -> Infer s (Maybe MetaType)
+lookupLocal :: Var -> Infer s (Maybe MetaType)
 lookupLocal v = askScope <&> Scope.lookupLocal v
 
 {-# INLINE lookupGlobal #-}
-lookupGlobal :: Val.Var -> Infer s (Maybe (Scheme 'TypeT))
+lookupGlobal :: Var -> Infer s (Maybe (Scheme 'TypeT))
 lookupGlobal v = askScope <&> Scope.lookupGlobal v
 
 nextFresh :: Infer s Int

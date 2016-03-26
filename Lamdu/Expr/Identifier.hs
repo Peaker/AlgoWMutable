@@ -1,6 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Identifier
+module Lamdu.Expr.Identifier
     ( Identifier(..)
     , Tag(..)
     ) where

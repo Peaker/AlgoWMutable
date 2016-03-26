@@ -3,7 +3,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
-module Type.Infer
+module Lamdu.Infer
     ( Infer, M.runInfer, inferScheme, infer
     ) where
 
@@ -12,22 +12,22 @@ import           Control.Lens.Tuple
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import           GHC.Exts (inline)
+import           Lamdu.Expr.Type (Type, AST(..))
+import           Lamdu.Expr.Type.Constraints (Constraints(..))
+import           Lamdu.Expr.Type.Meta
+import           Lamdu.Expr.Type.Scheme (Scheme)
+import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import           Lamdu.Expr.Val (Val(..))
+import qualified Lamdu.Expr.Val as Val
+import           Lamdu.Expr.Val.Annotated (AV(..))
+import           Lamdu.Expr.Val.Pure (V(..))
+import           Lamdu.Infer.Monad (Infer)
+import qualified Lamdu.Infer.Monad as M
+import           Lamdu.Infer.Scope (Scope)
+import qualified Lamdu.Infer.Scope as Scope
+import           Lamdu.Infer.Unify
 import           Pretty.Map ()
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type (Type, AST(..))
-import           Type.Constraints (Constraints(..))
-import           Type.Infer.Monad (Infer)
-import qualified Type.Infer.Monad as M
-import           Type.Infer.Scope (Scope)
-import qualified Type.Infer.Scope as Scope
-import           Type.Infer.Unify
-import           Type.Meta
-import           Type.Scheme (Scheme)
-import           Type.Tag (ASTTag(..))
-import qualified Val
-import           Val (Val(..))
-import           Val.Annotated (AV(..))
-import           Val.Pure (V(..))
 
 import           Prelude.Compat
 

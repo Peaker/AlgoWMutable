@@ -5,7 +5,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
-module Val
+module Lamdu.Expr.Val
     ( Val(..)
     , Leaf(..)
     , Abs(..), Var(..)
@@ -18,7 +18,7 @@ module Val
 
 import Control.DeepSeq (NFData(..))
 import Data.String (IsString)
-import Identifier
+import Lamdu.Expr.Identifier
 import Pretty.Map ()
 import Pretty.Utils ((<+?>))
 import Text.PrettyPrint (($+$), (<+>), (<>))

@@ -4,7 +4,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
-module Type.Scheme
+module Lamdu.Expr.Type.Scheme
     ( SchemeBinders(..)
     , Scheme(..), forAll
     ) where
@@ -14,14 +14,14 @@ import           Control.Lens.Operators
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Lamdu.Expr.Type as Type
+import           Lamdu.Expr.Type.Constraints (Constraints(..))
+import           Lamdu.Expr.Type.Pure (T(..), TVarName(..))
+import           Lamdu.Expr.Type.Tag (ASTTag(..), RecordT, SumT)
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>), intercalate)
 import           Text.PrettyPrint (Doc, (<>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import qualified Type
-import           Type.Constraints (Constraints(..))
-import           Type.Pure (T(..), TVarName(..))
-import           Type.Tag (ASTTag(..), RecordT, SumT)
 
 import           Prelude.Compat
 

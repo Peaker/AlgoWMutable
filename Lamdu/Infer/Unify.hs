@@ -10,7 +10,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
-module Type.Infer.Unify
+module Lamdu.Infer.Unify
     where
 
 import qualified Control.Lens as Lens
@@ -21,17 +21,17 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
 import qualified Data.Set as Set
-import           Identifier (Tag(..))
+import           Lamdu.Expr.Identifier (Tag(..))
+import           Lamdu.Expr.Type (Type, Composite, AST(..), TParamId)
+import qualified Lamdu.Expr.Type as Type
+import           Lamdu.Expr.Type.Constraints (Constraints(..))
+import           Lamdu.Expr.Type.Meta
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..), IsCompositeTag(..))
+import qualified Lamdu.Infer.Monad as M
 import           Pretty.Map ()
 import           Pretty.Utils (intercalate)
 import           Text.PrettyPrint (Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import qualified Type
-import           Type (Type, Composite, AST(..), TParamId)
-import           Type.Constraints (Constraints(..))
-import qualified Type.Infer.Monad as M
-import           Type.Meta
-import           Type.Tag (ASTTag(..), IsTag(..), IsCompositeTag(..))
 
 import           Prelude.Compat hiding (tail)
 

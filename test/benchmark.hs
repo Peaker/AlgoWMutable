@@ -1,18 +1,11 @@
 {-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
--- import Control.Exception (evaluate)
--- import Control.Lens (folded)
--- import Control.Lens.Operators
--- import Control.Lens.Tuple
--- import Control.Monad.State (evalStateT)
 import           Criterion (Benchmarkable, nf)
 import           Criterion.Main (bench, defaultMain)
--- import Type (infer, runInfer)
 import           Text.PrettyPrint ((<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-
 import qualified TestVals
-import           Type.Infer (inferScheme)
-import           Val.Pure (V(..))
+import           Lamdu.Infer (inferScheme)
+import           Lamdu.Expr.Val.Pure (V(..))
 
 import           Prelude.Compat
 

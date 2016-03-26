@@ -10,19 +10,19 @@ module InferTests
 import           Control.Lens.Operators
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Lamdu.Expr.Type.Pure (T, (~>), recordType, intType)
+import           Lamdu.Expr.Type.Scheme (Scheme)
+import qualified Lamdu.Expr.Type.Scheme as Scheme
+import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import qualified Lamdu.Expr.Val as Val
+import           Lamdu.Expr.Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
+import qualified Lamdu.Expr.Val.Pure as V
+import           Lamdu.Infer (inferScheme)
+import qualified Lamdu.Infer.Scope as Scope
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
 import           Text.PrettyPrint (vcat, Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import           Type.Pure (T, (~>), recordType, intType)
-import           Type.Scheme (Scheme)
-import qualified Type.Scheme as Scheme
-import           Type.Infer (inferScheme)
-import qualified Type.Infer.Scope as Scope
-import           Type.Tag (ASTTag(..))
-import qualified Val
-import           Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
-import qualified Val.Pure as V
 
 import           Prelude.Compat
 

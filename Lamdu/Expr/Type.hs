@@ -8,7 +8,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
-module Type
+module Lamdu.Expr.Type
     ( TId(..), TParamId(..)
     , Type, Composite
     , AST(..)
@@ -23,14 +23,14 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Proxy (Proxy(..))
 import           Data.String (IsString)
-import           Identifier (Identifier(..), Tag(..))
+import           Lamdu.Expr.Identifier (Identifier(..), Tag(..))
+import           Lamdu.Expr.Type.Tag
+    ( ASTTag(..), IsCompositeTag(..), CompositeTagEquality(..)
+    , RecordT, SumT )
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
 import           Text.PrettyPrint ((<+>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
-import           Type.Tag
-    ( ASTTag(..), IsCompositeTag(..), CompositeTagEquality(..)
-    , RecordT, SumT )
 
 import           Prelude.Compat
 

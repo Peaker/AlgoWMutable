@@ -1,18 +1,20 @@
+GHC=ghc -o "$@" -itest
+
 default: run
 
-benchmark.O2:
-	ghc -O2 -hisuf .O2.hi -osuf .O2.o -o $@ --make benchmark.hs
+test/benchmark.O2:
+	${GHC} -O2 -hisuf .O2.hi -osuf .O2.o test/benchmark.hs
 
-benchmark.O1:
-	ghc -O1 -hisuf .O1.hi -osuf .O1.o -o $@ --make benchmark.hs
+test/benchmark.O1:
+	${GHC} -O1 -hisuf .O1.hi -osuf .O1.o test/benchmark.hs
 
-benchmark.p.prof: benchmark.p
+test/benchmark.p.prof: benchmark.p
 	./$< +RTS -p
 
-benchmark.p:
-	ghc -O1 -o $@ --make benchmark.hs -hisuf .p_hi -osuf .p_o -prof -caf-all
+test/benchmark.p:
+	${GHC} -O1 test/benchmark.hs -hisuf .p_hi -osuf .p_o -prof -caf-all
 
-run: benchmark.O2
+run: test/benchmark.O2
 	-echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 	./$<
 	-echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
@@ -21,4 +23,4 @@ runboosted: benchmark
 	echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 	./$<
 
-.PHONY: benchmark benchmark.O1 benchmark.O2 benchmark.p benchmark.p.prof run
+.PHONY: test/{benchmark,benchmark.O1,benchmark.O2,benchmark.p,benchmark.p.prof} run

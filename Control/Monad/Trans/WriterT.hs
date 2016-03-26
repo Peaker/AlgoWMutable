@@ -1,5 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude, GeneralizedNewtypeDeriving, BangPatterns #-}
-module WriterT
+module Control.Monad.Trans.WriterT
     ( WriterT
     , runWriterT
     , tell

@@ -13,19 +13,16 @@ module TestVals
     -- )
     where
 
--- -- import           Control.Lens.Operators
 import qualified Data.Map as Map
--- -- import           Data.Monoid (Monoid(..), (<>))
--- -- import qualified Data.Set as Set
-import           Type.Pure (T, (~>))
-import           Type.Tag (ASTTag(..))
-import           Type.Infer.Scope (Scope)
-import qualified Type.Infer.Scope as Scope
-import qualified Type.Pure as T
-import qualified Type.Scheme as Scheme
-import qualified Val
-import qualified Val.Pure as V
-import           Val.Pure (V, ($$), ($$:))
+import           Lamdu.Expr.Type.Pure (T, (~>))
+import qualified Lamdu.Expr.Type.Pure as T
+import qualified Lamdu.Expr.Type.Scheme as Scheme
+import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import qualified Lamdu.Expr.Val as Val
+import           Lamdu.Expr.Val.Pure (V, ($$), ($$:))
+import qualified Lamdu.Expr.Val.Pure as V
+import           Lamdu.Infer.Scope (Scope)
+import qualified Lamdu.Infer.Scope as Scope
 
 import           Prelude.Compat
 

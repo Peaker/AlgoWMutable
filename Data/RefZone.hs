@@ -1,5 +1,5 @@
 {-# LANGUAGE RankNTypes, NoImplicitPrelude, GeneralizedNewtypeDeriving #-}
-module RefZone
+module Data.RefZone
     ( Zone, new
     , Frozen, freeze, clone
     , Ref, newRef, readRef, writeRef, modifyRef

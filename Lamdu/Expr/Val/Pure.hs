@@ -2,7 +2,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Val.Pure
+module Lamdu.Expr.Val.Pure
     ( V(..)
     , lam, lambda, lambdaRecord
     , absurd, case_, cases
@@ -11,10 +11,10 @@ module Val.Pure
     , recVal, var, infixApp
     ) where
 
-import Identifier (Tag(..))
+import Lamdu.Expr.Identifier (Tag(..))
+import Lamdu.Expr.Val
 import Pretty.Map ()
 import Text.PrettyPrint.HughesPJClass (Pretty(..))
-import Val
 
 import Prelude.Compat
 

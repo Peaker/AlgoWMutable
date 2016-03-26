@@ -2,7 +2,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE DataKinds #-}
-module Type.Tag
+module Lamdu.Expr.Type.Tag
     ( CompositeTag(..), CompositeTagEquality(..), IsCompositeTag(..)
     , RecordT
     , SumT

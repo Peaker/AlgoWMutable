@@ -1,7 +1,7 @@
 -- | Inference Scope
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE DataKinds #-}
-module Type.Infer.Scope
+module Lamdu.Infer.Scope
     ( Scope
     , newScope, emptyScope
     , insertLocal
@@ -10,10 +10,10 @@ module Type.Infer.Scope
 
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Lamdu.Expr.Type.Scheme (Scheme)
+import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import qualified Lamdu.Expr.Val as Val
 import           Pretty.Map ()
-import           Type.Tag (ASTTag(..))
-import           Type.Scheme (Scheme)
-import qualified Val
 
 import           Prelude.Compat
 

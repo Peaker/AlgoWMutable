@@ -9,21 +9,21 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- | Types with meta-variables
 
-module Type.Meta
+module Lamdu.Expr.Type.Meta
     ( IsBound(..), MetaVar(..), MetaTypeAST(..), MetaType, MetaComposite
     ) where
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Data.Monoid ((<>))
+import qualified Data.RefZone as RefZone
 import           Data.Set (Set)
 import qualified Data.Set as Set
-import qualified RefZone
+import qualified Lamdu.Expr.Type as Type
+import           Lamdu.Expr.Type.Constraints (Constraints)
+import           Lamdu.Expr.Type.Pure (TVarName)
+import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import qualified Type
-import           Type.Pure (TVarName)
-import           Type.Tag (ASTTag(..))
-import           Type.Constraints (Constraints)
 
 import           Prelude.Compat
 

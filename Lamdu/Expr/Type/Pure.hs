@@ -5,7 +5,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
-module Type.Pure
+module Lamdu.Expr.Type.Pure
     ( T(..), TVarName(..)
     , recordType, compositeFrom, (~>), tInst
     , intType, boolType
@@ -14,12 +14,12 @@ module Type.Pure
 import           Control.DeepSeq (NFData(..))
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Identifier (Tag(..))
+import           Lamdu.Expr.Identifier (Tag(..))
+import qualified Lamdu.Expr.Type as Type
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import           Pretty.Map ()
 import           Text.PrettyPrint ((<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import qualified Type
-import           Type.Tag (ASTTag(..), IsCompositeTag(..))
 
 import           Prelude.Compat
 

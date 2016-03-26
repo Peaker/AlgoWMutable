@@ -4,13 +4,13 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
-module Val.Annotated (AV(..)) where
+module Lamdu.Expr.Val.Annotated (AV(..)) where
 
 import Control.DeepSeq (NFData(..))
+import Lamdu.Expr.Val (Val(..))
 import Pretty.Map ()
 import Text.PrettyPrint (isEmpty, (<>))
 import Text.PrettyPrint.HughesPJClass (Pretty(..))
-import Val (Val(..))
 
 import Prelude.Compat
 

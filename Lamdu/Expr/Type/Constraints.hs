@@ -2,14 +2,14 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Type.Constraints
+module Lamdu.Expr.Type.Constraints
     ( Constraints(..)
     ) where
 
 import Control.DeepSeq (NFData(..))
 import Data.Set (Set)
-import Identifier (Tag)
-import Type.Tag
+import Lamdu.Expr.Identifier (Tag)
+import Lamdu.Expr.Type.Tag
 
 data Constraints tag where
     TypeConstraints :: Constraints 'TypeT

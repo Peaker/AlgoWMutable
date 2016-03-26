@@ -1,22 +1,22 @@
 {-# LANGUAGE NoImplicitPrelude #-}
-module TestRefZone where
+module Data.TestRefZone where
 
 import Control.Monad
 import Control.Monad.ST
-import RefZone
+import Data.RefZone
 
 import Prelude.Compat
 
 main :: IO ()
 main = print ok
     where
-        (frozen, ref) =
+        (ref, frozen) =
             freeze $
             do
                 zone <- new
                 r <- newRef zone "Hi"
                 writeRef zone r "Hi"
-                return (zone, r)
+                return (r, zone)
         ref' = runST $
              do
                  zone0 <- clone frozen
