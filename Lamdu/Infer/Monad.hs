@@ -14,7 +14,7 @@ module Lamdu.Infer.Monad
     , repr
     , freshRef
     , writeRef
-    , freshTVar
+    , freshMetaVar
     , localScope
     , lookupGlobal, lookupLocal
     , instantiate, generalize
@@ -173,17 +173,17 @@ nextFresh =
 freshRef :: Constraints tag -> Infer s (MetaVar tag)
 freshRef cs = Unbound cs & LinkFinal & newRef
 
-{-# INLINE freshTVar #-}
-freshTVar :: Constraints tag -> Infer s (MetaTypeAST tag)
-freshTVar cs = freshRef cs <&> MetaTypeVar
+{-# INLINE freshMetaVar #-}
+freshMetaVar :: Constraints tag -> Infer s (MetaTypeAST tag)
+freshMetaVar cs = freshRef cs <&> MetaTypeVar
 
 instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (MetaTypeAST tag)
 instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
     {-# SCC "instantiate" #-}
     do
-        typeUFs <- {-# SCC "instantiate.freshtvs" #-}traverse freshTVar typeVars
-        recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshTVar recordVars
-        sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshTVar sumVars
+        typeUFs <- {-# SCC "instantiate.freshtvs" #-}traverse freshMetaVar typeVars
+        recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshMetaVar recordVars
+        sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshMetaVar sumVars
         let go :: IntMap (MetaTypeAST t) -> T t -> Infer s (MetaTypeAST t)
             go binders (TVar (TVarName i)) = return (binders IntMap.! i)
             go _ (T typeAST) =

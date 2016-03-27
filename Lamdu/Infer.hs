@@ -49,7 +49,7 @@ inferLeaf leaf =
     Val.LAbsurd ->
         {-# SCC "inferAbsurd" #-}
         do
-            res <- M.freshTVar TypeConstraints
+            res <- M.freshMetaVar TypeConstraints
             let emptySum = MetaTypeAST TEmptyComposite & TSum & MetaTypeAST
             TFun emptySum res & MetaTypeAST & return
     Val.LInt _ ->
@@ -57,7 +57,7 @@ inferLeaf leaf =
         MetaTypeAST int & return
     Val.LHole ->
         {-# SCC "inferHole" #-}
-        M.freshTVar TypeConstraints
+        M.freshMetaVar TypeConstraints
     Val.LVar n ->
         {-# SCC "inferVar" #-}
         M.lookupLocal n >>= \case
@@ -73,7 +73,7 @@ inferLam :: Val.Abs V -> Infer s InferResult
 inferLam (Val.Abs n body) =
     {-# SCC "inferLam" #-}
     do
-        nType <- M.freshTVar TypeConstraints
+        nType <- M.freshMetaVar TypeConstraints
         (body', resType) <- infer body & M.localScope (Scope.insertLocal n nType)
         TFun nType resType & MetaTypeAST
             & inferRes (Val.BLam (Val.Abs n body')) & return
@@ -88,7 +88,7 @@ inferApp (Val.App fun arg) =
             case funTyp of
             MetaTypeVar ref ->
                 do
-                    resTyp <- M.freshTVar TypeConstraints
+                    resTyp <- M.freshMetaVar TypeConstraints
                     unifyVarAST unifyTypeAST (TFun argTyp resTyp) ref
                     return resTyp
             MetaTypeAST (TFun paramTyp resTyp) ->
@@ -109,7 +109,7 @@ inferRecExtend (Val.RecExtend name val rest) =
             MetaTypeVar ref ->
                 do
                     unknownRestFields <-
-                        M.freshTVar $ CompositeConstraints $
+                        M.freshMetaVar $ CompositeConstraints $
                         Set.singleton name
                     -- TODO (Optimization): ref known to be unbound
                     unifyVarAST unifyTypeAST (TRecord unknownRestFields) ref
@@ -143,15 +143,15 @@ inferCase :: Val.Case V -> Infer s InferResult
 inferCase (Val.Case name handler restHandler) =
     {-# SCC "inferCase" #-}
     do
-        resType <- M.freshTVar TypeConstraints
+        resType <- M.freshMetaVar TypeConstraints
         let toResType x = TFun x resType & MetaTypeAST
 
-        fieldType <- M.freshTVar TypeConstraints
+        fieldType <- M.freshMetaVar TypeConstraints
 
         (handler', handlerTyp) <- infer handler
         (restHandler', restHandlerTyp) <- infer restHandler
 
-        sumTail <- M.freshTVar $ CompositeConstraints $ Set.singleton name
+        sumTail <- M.freshMetaVar $ CompositeConstraints $ Set.singleton name
 
         let expectedHandlerTyp = toResType fieldType
         unifyType expectedHandlerTyp handlerTyp
@@ -168,10 +168,10 @@ inferGetField :: Val.GetField V -> Infer s InferResult
 inferGetField (Val.GetField val name) =
     {-# SCC "inferGetField" #-}
     do
-        resTyp <- M.freshTVar TypeConstraints
+        resTyp <- M.freshMetaVar TypeConstraints
         (val', valTyp) <- infer val
         expectedValTyp <-
-            M.freshTVar (CompositeConstraints (Set.singleton name))
+            M.freshMetaVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name resTyp
             <&> MetaTypeAST
             <&> TRecord <&> MetaTypeAST
@@ -183,7 +183,7 @@ inferInject (Val.Inject name val) =
     {-# SCC "inferInject" #-}
     do
         (val', valTyp) <- infer val
-        M.freshTVar (CompositeConstraints (Set.singleton name))
+        M.freshMetaVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name valTyp
             <&> MetaTypeAST
             <&> TSum <&> MetaTypeAST
