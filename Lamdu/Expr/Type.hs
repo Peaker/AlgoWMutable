@@ -126,7 +126,7 @@ _TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
 instance (Pretty (ast 'TypeT),
           Pretty (ast RecordT),
           Pretty (ast SumT)) =>
-         Pretty (Type ast) where
+         Pretty (AST tag ast) where
     pPrintPrec level prec ast =
         case ast of
         TFun a b ->
@@ -137,18 +137,11 @@ instance (Pretty (ast 'TypeT),
             | otherwise -> pPrint name <+> pPrint params
         TRecord r -> pPrintPrec level prec r
         TSum s -> pPrintPrec level prec s
-
--- This pretty instance is separate because we want to be able to have
--- the "c" type-var in the instance context, which is impossible if we
--- don't know that we're an instance of a composite in the first-place
-instance (IsCompositeTag c,
-          Pretty (ast 'TypeT),
-          Pretty (ast ('CompositeT c))) =>
-         Pretty (Composite c ast) where
-    pPrintPrec level prec ast =
-        case ast of
         TEmptyComposite -> "{}"
-        TCompositeExtend n t r ->
+        TCompositeExtend n t (r :: ast ('CompositeT c)) ->
             maybeParens (prec > 1) $
             "{" <+> pPrint n <+> ":" <+> pPrintPrec level 0 t <+> "}" <+?>
-            text [compositeChar (Proxy :: Proxy c)] <+> pPrintPrec level 1 r
+            text [compositeChar (Proxy :: Proxy c)] <+>
+            ( case compositeTagRefl :: CompositeTagEquality c of
+              IsRecordC -> pPrintPrec level 1 r
+              IsSumC    -> pPrintPrec level 1 r )
