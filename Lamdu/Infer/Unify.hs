@@ -152,6 +152,9 @@ unifyComposite ::
     M.Infer s ()
 unifyComposite = {-# SCC "unifyComposite" #-}unify unifyCompositeAST
 
+unifyType :: MetaType -> MetaType -> M.Infer s ()
+unifyType = {-# SCC "unifyType" #-}unify unifyTypeAST
+
 -- We already know we are record vals, and will re-read them
 -- via flatten, so no need for unify's read of these:
 unifyCompositeAST ::
@@ -245,9 +248,6 @@ unifyMatch expected vTyp prism =
     case vTyp ^? prism of
     Nothing -> M.throwError $ M.DoesNotUnify expected (pPrint vTyp)
     Just vcontent -> return vcontent
-
-unifyType :: MetaType -> MetaType -> M.Infer s ()
-unifyType = {-# SCC "unifyType" #-}unify unifyTypeAST
 
 unifyTypeAST :: Type MetaTypeAST -> Type MetaTypeAST -> M.Infer s ()
 unifyTypeAST uTyp@(TInst uName uParams) vTyp =
