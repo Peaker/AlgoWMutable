@@ -16,15 +16,16 @@ import           GHC.Exts (inline)
 import           Lamdu.Expr.Identifier (Tag)
 import           Lamdu.Expr.Type (Type, AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
-import           Lamdu.Infer.Meta
 import           Lamdu.Expr.Type.Scheme (Scheme)
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import           Lamdu.Expr.Val (Val(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..))
 import           Lamdu.Expr.Val.Pure (V(..))
+import           Lamdu.Infer.Meta
 import           Lamdu.Infer.Monad (Infer)
 import qualified Lamdu.Infer.Monad as M
+import qualified Lamdu.Infer.Nominal as InferNominal
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
 import           Lamdu.Infer.Unify
@@ -206,17 +207,33 @@ inferInject (Val.Inject name val) =
             <&> TSum <&> MetaTypeAST
             <&> inferRes (Val.BInject (Val.Inject name val'))
 
+inferFromNom :: Val.Nom V -> Infer s InferResult
+inferFromNom (Val.Nom n val) =
+    do
+        (val', valTyp) <- infer val
+        -- TODO: Optimization: give valTyp (which should be a TInst)
+        -- directly to instantiateFromNom, which can directly work
+        -- with the params instead of creating metavars and unifying
+        -- with them immediately after
+        (nomTypeParams, innerTyp) <-
+            M.lookupNominal n
+            >>= InferNominal.instantiateFromNom n
+        TInst n nomTypeParams
+            & MetaTypeAST & unifyType valTyp
+        inferRes (Val.BFromNom (Val.Nom n val')) innerTyp & return
+
 infer :: V -> Infer s InferResult
 infer (V v) =
     {-# SCC "infer" #-}
     case v of
-    Val.BLeaf x -> inferLeaf x
-    Val.BLam x -> inferLam x
-    Val.BApp x -> inferApp x
+    Val.BLeaf x      -> inferLeaf x
+    Val.BLam x       -> inferLam x
+    Val.BApp x       -> inferApp x
     Val.BRecExtend x -> inferRecExtend x
-    Val.BGetField x -> inferGetField x
-    Val.BInject x -> inferInject x
-    Val.BCase x -> inferCase x
+    Val.BGetField x  -> inferGetField x
+    Val.BInject x    -> inferInject x
+    Val.BFromNom x   -> inferFromNom x
+    Val.BCase x      -> inferCase x
 
 inferScheme :: Scope MetaType -> V -> Either M.Err (AV MetaType, Scheme 'TypeT)
 inferScheme scope x =

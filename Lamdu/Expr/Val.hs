@@ -14,11 +14,12 @@ module Lamdu.Expr.Val
     , Case(..)
     , GetField(..)
     , Inject(..)
+    , Nom(..)
     ) where
 
 import Control.DeepSeq (NFData(..))
 import Data.String (IsString)
-import Lamdu.Expr.Identifier
+import Lamdu.Expr.Identifier (Identifier, Tag, NominalId)
 import Pretty.Map ()
 import Pretty.Utils ((<+?>))
 import Text.PrettyPrint (($+$), (<+>), (<>))
@@ -74,6 +75,10 @@ data Inject v = Inject Tag !v
     deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Inject v) where rnf (Inject a b) = rnf a `seq` rnf b
 
+data Nom v = Nom NominalId !v
+    deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (Nom v) where rnf (Nom a b) = rnf a `seq` rnf b
+
 data Val v
     = BLam (Abs v)
     | BApp (App v)
@@ -81,6 +86,7 @@ data Val v
     | BCase (Case v)
     | BGetField (GetField v)
     | BInject (Inject v)
+    | BFromNom (Nom v)
     | BLeaf Leaf
     deriving (Show, Functor, Foldable, Traversable)
 
@@ -90,6 +96,7 @@ instance NFData v => NFData (Val v) where
     rnf (BRecExtend x) = rnf x
     rnf (BCase x) = rnf x
     rnf (BGetField x) = rnf x
+    rnf (BFromNom x) = rnf x
     rnf (BInject x) = rnf x
     rnf (BLeaf x) = rnf x
 
@@ -116,5 +123,8 @@ instance Pretty v => Pretty (Val v) where
     pPrintPrec level prec (BInject (Inject name val)) =
         maybeParens (prec > 8) $
         pPrint name <+> pPrintPrec level 8 val
+    pPrintPrec level prec (BFromNom (Nom tId val)) =
+        maybeParens (prec > 5) $
+        pPrintPrec level 5 val <+> "»" <> pPrint tId
     pPrintPrec level prec (BLeaf leaf) = pPrintPrec level prec leaf
 

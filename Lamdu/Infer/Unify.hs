@@ -26,8 +26,8 @@ import qualified Data.Monoid as Monoid
 import           Data.RefZone (Ref)
 import           Data.Set (Set)
 import qualified Data.Set as Set
-import           Lamdu.Expr.Identifier (Tag(..))
-import           Lamdu.Expr.Type (Type, Composite, AST(..), TParamId)
+import           Lamdu.Expr.Identifier (Tag, TParamId)
+import           Lamdu.Expr.Type (Type, Composite, AST(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Scheme (schemeBindersLookup)
@@ -56,7 +56,9 @@ writeFinal ref = M.writeRef ref . LinkFinal
 -- Unify type     --
 
 unifyTInstParams ::
-    M.Err -> Map TParamId MetaType -> Map TParamId MetaType -> M.Infer s ()
+    M.Err ->
+    Map (TParamId 'TypeT) MetaType ->
+    Map (TParamId 'TypeT) MetaType -> M.Infer s ()
 unifyTInstParams err uParams vParams
     | uSize /= vSize = M.throwError err
     | uSize == 0 = return ()

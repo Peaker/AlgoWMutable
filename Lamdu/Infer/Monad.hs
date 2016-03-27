@@ -20,8 +20,8 @@ module Lamdu.Infer.Monad
     , freshMetaVar
     , localScope
     , lookupSkolem
-    , lookupGlobal, lookupLocal
-    , instantiate, generalize
+    , lookupGlobal, lookupLocal, lookupNominal
+    , instantiate, instantiateBinders, generalize
     ) where
 
 import           Control.Lens (Lens')
@@ -40,17 +40,18 @@ import qualified Data.RefZone.RefMap as RefMap
 import           Data.RefZone.RefSet (RefSet)
 import qualified Data.RefZone.RefSet as RefSet
 import           Data.STRef
-import           Lamdu.Expr.Identifier (Tag(..))
+import           Lamdu.Expr.Identifier (Tag(..), NominalId(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
-import           Lamdu.Infer.Meta
-    ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..), MetaVarInfo(..) )
+import           Lamdu.Expr.Type.Nominal (Nominal)
 import           Lamdu.Expr.Type.Pure (T(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), ASTTagEquality(..), IsTag(..)
     , CompositeTagEquality(..), RecordT, SumT )
 import           Lamdu.Expr.Val (Var)
+import           Lamdu.Infer.Meta
+    ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..), MetaVarInfo(..) )
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
 import           Pretty.Map ()
@@ -65,6 +66,9 @@ data Err
     | VarNotInScope Var
     | SkolemNotInScope Doc
     | SkolemEscapes Doc
+    | OpaqueNominalUsed NominalId
+    | NominalWrongParams NominalId Doc Doc
+    | NominalNotInScope NominalId
     | InfiniteType
     | DuplicateFields [Tag]
     | ConstraintUnavailable Tag Doc
@@ -73,6 +77,12 @@ data Err
 instance Pretty Err where
     pPrint (DoesNotUnify expected got) =
         "expected:" <+> expected <+> "but got:" <+> got
+    pPrint (OpaqueNominalUsed name) =
+        pPrint name <+> "used but is opaque!"
+    pPrint (NominalWrongParams name expected given) =
+        pPrint name <+> "expects params:" <+> expected <+> "but given:" <+> given
+    pPrint (NominalNotInScope name) =
+        pPrint name <+> "not in scope!"
     pPrint (VarNotInScope name) =
         pPrint name <+> "not in scope!"
     pPrint (SkolemNotInScope name) =
@@ -169,10 +179,17 @@ localScope f = localEnv $ \e -> e { envScope = f (envScope e) }
 askScope :: Infer s (Scope MetaType)
 askScope = askEnv <&> envScope
 
+{-# INLINE lookupNominal #-}
+lookupNominal :: NominalId -> Infer s Nominal
+lookupNominal n =
+    askScope <&> Scope.lookupNominal n
+    >>= maybe (throwError (NominalNotInScope n)) return
+
 {-# INLINE lookupSkolem #-}
 lookupSkolem :: IsTag tag => Type.TVarName tag -> Infer s (Constraints tag)
 lookupSkolem v =
-    askScope <&> Scope.lookupSkolem v >>= maybe (throwError (SkolemNotInScope (pPrint v))) return
+    askScope <&> Scope.lookupSkolem v
+    >>= maybe (throwError (SkolemNotInScope (pPrint v))) return
 
 {-# INLINE lookupLocal #-}
 lookupLocal :: Var -> Infer s (Maybe MetaType)
@@ -208,22 +225,36 @@ freshMetaVar :: Constraints tag -> Infer s (MetaTypeAST tag)
 freshMetaVar cs = freshRef cs <&> MetaTypeVar
 
 -- | Convert a Scheme's bound/quantified variables to meta-variables
-instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (MetaTypeAST tag)
-instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
+instantiateBinders ::
+    forall f s tag. IsTag tag =>
+    SchemeBinders -> f tag ->
+    (forall tag'. IsTag tag' =>
+     ((Type.AST tag' f -> Infer s (MetaTypeAST tag')) ->
+      f tag' -> Infer s (MetaTypeAST tag'))) ->
+    Infer s (MetaTypeAST tag)
+instantiateBinders (SchemeBinders typeVars recordVars sumVars) typ k =
     {-# SCC "instantiate" #-}
     do
         typeUFs <- {-# SCC "instantiate.freshtvs" #-}traverse freshMetaVar typeVars
         recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshMetaVar recordVars
         sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshMetaVar sumVars
-        let go :: IntMap (MetaTypeAST t) -> T t -> Infer s (MetaTypeAST t)
-            go binders (T (Type.TSkolem (Type.TVarName i))) = return (binders IntMap.! i)
-            go _ (T typeAST) =
-                Type.ntraverse (go typeUFs) (go recordUFs) (go sumUFs) typeAST
-                <&> MetaTypeAST
-        {-# SCC "instantiate.go" #-}typ & case tagRefl :: ASTTagEquality tag of
-            IsTypeT -> go typeUFs
-            IsCompositeT IsRecordC -> go recordUFs
-            IsCompositeT IsSumC -> go sumUFs
+        let go :: IntMap (MetaTypeAST t) -> Type.AST t f -> Infer s (MetaTypeAST t)
+            go binders (Type.TSkolem (Type.TVarName i)) = return (binders IntMap.! i)
+            go _ typeAST =
+                Type.ntraverse
+                (k (go typeUFs))
+                (k (go recordUFs))
+                (k (go sumUFs)) typeAST <&> MetaTypeAST
+        let goTop =
+                case tagRefl :: ASTTagEquality tag of
+                IsTypeT -> go typeUFs
+                IsCompositeT IsRecordC -> go recordUFs
+                IsCompositeT IsSumC -> go sumUFs
+        k goTop typ
+
+-- | Convert a Scheme's bound/quantified variables to meta-variables
+instantiate :: IsTag tag => Scheme tag -> Infer s (MetaTypeAST tag)
+instantiate (Scheme binders typ) = instantiateBinders binders typ (. unT)
 
 repr :: MetaVar tag -> Infer s (MetaVar tag, Final tag)
 repr x =

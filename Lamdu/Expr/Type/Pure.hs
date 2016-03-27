@@ -13,7 +13,7 @@ module Lamdu.Expr.Type.Pure
 import           Control.DeepSeq (NFData(..))
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Lamdu.Expr.Identifier (Tag(..))
+import           Lamdu.Expr.Identifier (Tag, NominalId, TParamId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import           Pretty.Map ()
@@ -21,7 +21,7 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-newtype T tag = T (Type.AST tag T)
+newtype T tag = T { unT :: Type.AST tag T }
 instance NFData (T tag) where rnf (T x) = rnf x
 
 instance Pretty (Type.AST tag T) => Pretty (T tag) where
@@ -38,7 +38,7 @@ compositeFrom ((name, typ):fs) = T $ Type.TCompositeExtend name typ $ compositeF
 recordType :: [(Tag, T 'TypeT)] -> T 'TypeT
 recordType = T . Type.TRecord . compositeFrom
 
-tInst :: Type.NominalId -> Map Type.TParamId (T 'TypeT) -> T 'TypeT
+tInst :: NominalId -> Map (TParamId 'TypeT) (T 'TypeT) -> T 'TypeT
 tInst name params = T $ Type.TInst name params
 
 intType :: T 'TypeT

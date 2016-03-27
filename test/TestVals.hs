@@ -13,11 +13,19 @@ module TestVals
     -- )
     where
 
+import           Control.Lens.Operators
+import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
+import qualified Data.Set as Set
+import           Lamdu.Expr.Identifier (NominalId, Tag)
+import           Lamdu.Expr.Type (AST(..))
+import qualified Lamdu.Expr.Type as Type
+import           Lamdu.Expr.Type.Nominal
+    ( Nominal(..), NominalType(..), NominalScheme(..), ParameterizedType(..) )
 import           Lamdu.Expr.Type.Pure (T, (~>))
 import qualified Lamdu.Expr.Type.Pure as T
 import qualified Lamdu.Expr.Type.Scheme as Scheme
-import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Pure (V, ($$), ($$:))
 import qualified Lamdu.Expr.Val.Pure as V
@@ -42,28 +50,68 @@ whereItem name val mkBody = V.lambda name mkBody $$ val
 -- openRecordType :: Text -> [(Text, TType)] -> TType
 -- openRecordType tv = TRecord . foldr (uncurry RecExtend) (CVar tv)
 
--- listTypePair :: (Id, Nominal)
--- listTypePair =
---     ( "List"
---     , Nominal
---         { nParams = Map.singleton "elem" tvName
---         , nScheme =
---             CEmpty
---             & CExtend "[]" (recordType [])
---             & CExtend ":" (recordType [("head", tv), ("tail", listOf tv)])
---             & TSum
---             & Scheme.mono
---         }
---     )
---     where
---         tvName = "a"
---         tv = TVar tvName
+p :: AST tag ParameterizedType -> ParameterizedType tag
+p = ParameterizedType
+
+pComposite :: IsCompositeTag c => [(Tag, ParameterizedType 'TypeT)] -> ParameterizedType ('CompositeT c)
+pComposite = foldr ((p .) . uncurry TCompositeExtend) (p TEmptyComposite)
+
+pRecord :: [(Tag, ParameterizedType 'TypeT)] -> ParameterizedType 'TypeT
+pRecord = p . TRecord . pComposite
+
+pSum :: [(Tag, ParameterizedType 'TypeT)] -> ParameterizedType 'TypeT
+pSum = p . TSum . pComposite
+
+listTypePair :: (NominalId, Nominal)
+listTypePair =
+    ( "List"
+    , Nominal
+      { nParams = Set.singleton "elem"
+      , nType =
+        pSum
+        [ ("Empty", pRecord [])
+        , ("NonEmpty" , pRecord [("head", tv), ("tail", p (TInst "List" (Map.singleton "elem" tv)))])
+        ]
+        & NominalScheme mempty
+        & NominalType
+      }
+    )
+    where
+        tv = ParamRef "elem"
 
 listOf :: TType -> TType
 listOf = T.tInst "List" . Map.singleton "elem"
 
--- boolType :: TType
--- boolType = TInst (fst boolTypePair) Map.empty
+stTypePair :: (NominalId, Nominal)
+stTypePair =
+    ( "ST"
+    , Nominal
+      { nParams = Set.fromList ["s", "elem"]
+      , nType = OpaqueNominal
+      }
+    )
+
+closedStTypePair :: (NominalId, Nominal)
+closedStTypePair =
+    ( "ClosedST"
+    , Nominal
+      { nParams = Set.singleton "elem"
+      , nType =
+        Map.fromList [("s", (p (TSkolem (Type.TVarName s)))), ("elem", ParamRef "elem")]
+        & TInst "St" & p
+        & NominalScheme mempty
+          { Scheme.schemeTypeBinders =
+            IntMap.singleton s mempty
+          }
+        & NominalType
+      }
+    )
+    where
+        s = 0
+
+
+closedStOf :: TType -> TType
+closedStOf = T.tInst "ClosedST" . Map.singleton "elem"
 
 -- boolTypePair :: (Id, Nominal)
 -- boolTypePair =
@@ -172,60 +220,61 @@ listOf = T.tInst "List" . Map.singleton "elem"
 infixArgs :: V -> V -> V
 infixArgs l r = V.recVal [("l", l), ("r", r)]
 
--- env :: Loaded
 env :: Scope a
-env = Scope.newScope $
-    -- Loaded
-    -- { loadedGlobalTypes =
-        Map.fromList
-        [ ("fix",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> (a ~> a) ~> a)
-        , ("if",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("condition", T.boolType), ("then", a), ("else", a)] ~> a)
-        , ("==",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
-        , (">",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
-        , ("%",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("*",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("-",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("+",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
-        , ("/",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+env = Scope.newScope nominals globals
+    where
+        nominals =
+            Map.fromList
+            [ listTypePair
+            , stTypePair
+            , closedStTypePair
+            -- , boolTypePair
+            -- , polyIdTypePair
+            -- , unsafeCoerceTypePair
+            -- , ignoredParamTypePair
+            -- , xGetterPair
+            -- , xGetterPairConstrained
+            ]
+        globals = Map.fromList
+            [ ("fix",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> (a ~> a) ~> a)
+            , ("if",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("condition", T.boolType), ("then", a), ("else", a)] ~> a)
+            , ("==",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
+            , (">",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
+            , ("%",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+            , ("*",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+            , ("-",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+            , ("+",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
+            , ("/",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
 
-        , ("bool'",  Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.boolType ~> a ~> a ~> a)
-        , ("eq",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> T.boolType)
-        , ("mul",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
-        , ("sub",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
+            , ("bool'",  Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.boolType ~> a ~> a ~> a)
+            , ("eq",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> T.boolType)
+            , ("mul",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
+            , ("sub",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
 
-        , ("//",     Scheme.forAll 0 0 0 $ \ []  [] [] -> infixType T.intType T.intType T.intType)
-        -- , ("sum",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
-        -- , ("filter", Scheme.forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
-        , (":",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("head", a), ("tail", listOf a)] ~> listOf a)
-        , ("[]",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a)
-        , ("concat", Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
-        , ("map",    Scheme.forAll 2 0 0 $ \ [a, b] [] [] -> T.recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
-        -- , ("..",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
-        , ("||",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType T.boolType T.boolType T.boolType)
-        , ("head",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
-        , ("negate", Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        , ("sqrt",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        , ("id",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
-        -- , ("zipWith",Scheme.forAll ["a","b","c"] $ \ [a,b,c] [] [] ->
-                                  -- (a ~> b ~> c) ~> listOf a ~> listOf b ~> listOf c )
-        -- , ("Just",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> maybeOf a)
-        -- , ("Nothing",Scheme.forAll 1 0 0 $ \ [a] [] [] -> maybeOf a)
-        -- , ("maybe",  Scheme.forAll ["a", "b"] $ \ [a, b] [] [] -> b ~> (a ~> b) ~> maybeOf a ~> b)
-        , ("plus1",  Scheme.forAll 0 0 0 $ \ [] [] [] -> T.intType ~> T.intType)
-        -- , ("True",   Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
-        -- , ("False",  Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
-        ]
-    -- , loadedNominals =
-    --     Map.fromList
-    --     [ listTypePair
-    --     , boolTypePair
-    --     , polyIdTypePair
-    --     , unsafeCoerceTypePair
-    --     , ignoredParamTypePair
-    --     , xGetterPair
-    --     , xGetterPairConstrained
-    --     ]
-    -- }
+            , ("//",     Scheme.forAll 0 0 0 $ \ []  [] [] -> infixType T.intType T.intType T.intType)
+            -- , ("sum",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+            -- , ("filter", Scheme.forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
+            , (":",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("head", a), ("tail", listOf a)] ~> listOf a)
+            , ("[]",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a)
+            , ("concat", Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
+            , ("map",    Scheme.forAll 2 0 0 $ \ [a, b] [] [] -> T.recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
+            -- , ("..",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
+            , ("||",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType T.boolType T.boolType T.boolType)
+            , ("head",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+            , ("negate", Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+            , ("sqrt",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+            , ("id",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
+            -- , ("zipWith",Scheme.forAll ["a","b","c"] $ \ [a,b,c] [] [] ->
+                                      -- (a ~> b ~> c) ~> listOf a ~> listOf b ~> listOf c )
+            -- , ("Just",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> maybeOf a)
+            -- , ("Nothing",Scheme.forAll 1 0 0 $ \ [a] [] [] -> maybeOf a)
+            -- , ("maybe",  Scheme.forAll ["a", "b"] $ \ [a, b] [] [] -> b ~> (a ~> b) ~> maybeOf a ~> b)
+            , ("plus1",  Scheme.forAll 0 0 0 $ \ [] [] [] -> T.intType ~> T.intType)
+            -- , ("True",   Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
+            -- , ("False",  Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
+
+            , ("runST",  Scheme.forAll 1 0 0 $ \ [a] [] [] -> closedStOf a ~> a)
+            ]
 
 list :: [V] -> V
 list = foldr cons (V.var "[]")

@@ -9,9 +9,10 @@ module Lamdu.Expr.Val.Pure
     , litInt, hole
     , ($$), ($$:), ($=), ($.), (.$), ($+), ($-)
     , recVal, var, infixApp
+    , fromNom
     ) where
 
-import Lamdu.Expr.Identifier (Tag(..))
+import Lamdu.Expr.Identifier (Tag(..), NominalId)
 import Lamdu.Expr.Val
 import Pretty.Map ()
 import Text.PrettyPrint.HughesPJClass (Pretty(..))
@@ -20,6 +21,9 @@ import Prelude.Compat
 
 newtype V = V (Val V)
     deriving (Show, Pretty)
+
+fromNom :: NominalId -> V -> V
+fromNom nomId val = V $ BFromNom $ Nom nomId val
 
 lam :: Var -> V -> V
 lam name body = V $ BLam $ Abs name body

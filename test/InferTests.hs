@@ -3,47 +3,29 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main
     ( test
-    , example1, example2, example3, example4, example5, example6, example7, example8, example9, example10, example11
+    , example1, example2, example3, example4, example5
+    , example6, example7, example8, example9, example10
+    , example11, example12, example13, example14, example15, example16
     , tests, main
     ) where
 
 import           Control.Lens.Operators
-import           Data.Map (Map)
-import qualified Data.Map as Map
-import           Lamdu.Expr.Type.Pure (T, (~>), recordType, intType)
-import           Lamdu.Expr.Type.Scheme (Scheme)
-import qualified Lamdu.Expr.Type.Scheme as Scheme
-import           Lamdu.Expr.Type.Tag (ASTTag(..))
-import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Lamdu.Expr.Val.Pure as V
 import           Lamdu.Infer (inferScheme)
-import qualified Lamdu.Infer.Scope as Scope
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
+import qualified TestVals as Vals
 import           Text.PrettyPrint (vcat, Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT
-infixType a b c = recordType [("l", a), ("r", b)] ~> c
-
-globals :: Map Val.Var (Scheme 'TypeT)
-globals =
-    mconcat
-    [ "+" ==> intInfix
-    , "-" ==> intInfix
-    ]
-    where
-        intInfix = Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType intType
-        (==>) = Map.singleton
-
 test :: V -> Doc
 test x =
     {-# SCC "test" #-}
     pPrint x <+?>
-    case inferScheme (Scope.newScope globals) x of
+    case inferScheme Vals.env x of
     Left err -> "causes type error:" <+> pPrint err
     Right (_, typ) -> " :: " <+> pPrint typ
 
@@ -99,6 +81,21 @@ example11 =
     V.lambda "x" $ \x ->
     f $$ (x $. "a") $$ x
 
+example12 :: V
+example12 = V.fromNom (fst Vals.listTypePair) $ V.lambda "x" $ \x -> x
+
+example13 :: V
+example13 = V.fromNom (fst Vals.listTypePair) V.hole
+
+example14 :: V
+example14 = V.fromNom (fst Vals.stTypePair) V.hole
+
+example15 :: V
+example15 = V.var "runST" $$ V.hole
+
+example16 :: V
+example16 = V.fromNom (fst Vals.closedStTypePair) V.hole
+
 tests :: Doc
 tests =
     vcat $ map test
@@ -113,6 +110,8 @@ tests =
     , example9
     , example10
     , example11
+    , example12
+    , example13
     ]
 
 main :: IO ()

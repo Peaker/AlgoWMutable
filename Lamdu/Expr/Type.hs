@@ -10,9 +10,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Lamdu.Expr.Type
-    ( NominalId(..), TParamId(..)
+    ( Type, Composite
     , TVarName(..)
-    , Type, Composite
     , AST(..)
       , _TFun, _TInst, _TRecord, _TSum, _TSkolem
       , _TEmptyComposite, _TCompositeExtend
@@ -24,8 +23,7 @@ import qualified Control.Lens as Lens
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Proxy (Proxy(..))
-import           Data.String (IsString)
-import           Lamdu.Expr.Identifier (Identifier(..), Tag(..))
+import           Lamdu.Expr.Identifier (Tag, NominalId, TParamId)
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), IsCompositeTag(..), CompositeTagEquality(..)
     , RecordT, SumT )
@@ -35,12 +33,6 @@ import           Text.PrettyPrint ((<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import           Prelude.Compat
-
-newtype NominalId = NominalId { _nominalId :: Identifier }
-    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
-
-newtype TParamId = TParamId { _tParamId :: Identifier }
-    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
 newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
     deriving (Eq, Ord, Show, NFData)
@@ -52,7 +44,7 @@ data AST (tag :: ASTTag) ast where
     -- | A skolem is a quantified type-variable (from a Scheme binder)
     TSkolem :: TVarName tag -> AST tag ast
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> AST 'TypeT ast
-    TInst :: {-# UNPACK #-}!NominalId -> !(Map TParamId (ast 'TypeT)) -> AST 'TypeT ast
+    TInst :: {-# UNPACK #-}!NominalId -> !(Map (TParamId 'TypeT) (ast 'TypeT)) -> AST 'TypeT ast
     TRecord :: !(ast RecordT) -> AST 'TypeT ast
     TSum :: !(ast SumT) -> AST 'TypeT ast
     TEmptyComposite :: IsCompositeTag c => AST ('CompositeT c) ast
@@ -109,7 +101,7 @@ _TSkolem = Lens.prism' TSkolem $ \case
     _ -> Nothing
 
 {-# INLINE _TInst #-}
-_TInst :: Lens.Prism' (Type ast) (NominalId, Map TParamId (ast 'TypeT))
+_TInst :: Lens.Prism' (Type ast) (NominalId, Map (TParamId 'TypeT) (ast 'TypeT))
 _TInst = Lens.prism' (uncurry TInst) $ \case
     TInst n p -> Just (n, p)
     _ -> Nothing
