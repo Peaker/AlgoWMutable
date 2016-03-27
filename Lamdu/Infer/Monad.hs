@@ -245,25 +245,30 @@ derefCache tag =
 
 deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
 deref = \case
-    MetaTypeAST ast ->
-        ast & Type.ntraverse deref deref deref <&> T
-    MetaTypeVar (MetaVar tvRef) ->
-        do
-            visited <- RSS.ask
-            when (tvRef `RefSet.isMember` visited) $
-                lift (throwError InfiniteType)
-            cached <- Lens.use (derefCache tvRef)
-            case cached of
-                Just t -> pure t
-                Nothing ->
-                    lift (readRef tvRef) >>= \case
-                    Unbound cs ->
-                        do
-                            tvName <- nextFresh <&> TVarName & lift
-                            schemeBindersSingleton tvName cs & RSS.tell
-                            return $ TVar tvName
-                    Bound meta -> deref meta & RSS.local (RefSet.insert tvRef)
-                >>= (derefCache tvRef <?=)
+    MetaTypeAST ast -> derefAST ast
+    MetaTypeVar var -> derefVar var
+
+derefVar :: IsTag tag => MetaVar tag -> Deref s (T tag)
+derefVar (MetaVar tvRef) =
+    do
+        visited <- RSS.ask
+        when (tvRef `RefSet.isMember` visited) $
+            lift (throwError InfiniteType)
+        cached <- Lens.use (derefCache tvRef)
+        case cached of
+            Just t -> pure t
+            Nothing ->
+                lift (readRef tvRef) >>= \case
+                Unbound cs ->
+                    do
+                        tvName <- nextFresh <&> TVarName & lift
+                        schemeBindersSingleton tvName cs & RSS.tell
+                        return $ TVar tvName
+                Bound meta -> deref meta & RSS.local (RefSet.insert tvRef)
+            >>= (derefCache tvRef <?=)
+
+derefAST :: IsTag tag => Type.AST tag MetaTypeAST -> Deref s (T tag)
+derefAST = fmap T . Type.ntraverse deref deref deref
 
 generalize :: MetaType -> Infer s (Scheme 'TypeT)
 generalize t =
