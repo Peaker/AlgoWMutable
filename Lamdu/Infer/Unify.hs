@@ -88,7 +88,6 @@ unifyCompositesClosedClosed uFields vFields
 flatConstraintsCheck :: Constraints ('CompositeT c) -> FlatComposite c -> M.Infer s ()
 flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) flatComposite =
     do
-        let duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
         unless (Set.null duplicates) $ M.throwError $ M.DuplicateFields $
             Set.toList duplicates
         case innerTail of
@@ -96,6 +95,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
             CompositeTailOpen (MetaVar _ ref) innerConstraints ->
                 M.writeRef ref $ Unbound $ outerConstraints `mappend` innerConstraints
     where
+        duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
         FlatComposite innerFields innerTail = flatComposite
 
 constraintsCheck ::
