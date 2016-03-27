@@ -1,10 +1,10 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
-module InferTests
+module Main
     ( test
     , example1, example2, example3, example4, example5, example6, example7, example8, example9, example10, example11
-    , runTests
+    , tests, main
     ) where
 
 import           Control.Lens.Operators
@@ -99,8 +99,8 @@ example11 =
     V.lambda "x" $ \x ->
     f $$ (x $. "a") $$ x
 
-runTests :: Doc
-runTests =
+tests :: Doc
+tests =
     vcat $ map test
     [ example1
     , example2
@@ -114,3 +114,5 @@ runTests =
     , example10
     , example11
     ]
+
+main = print tests
