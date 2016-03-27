@@ -126,26 +126,28 @@ throwError err = Infer $ \_ -> return $ Left err
 localEnv :: (Env s -> Env s) -> Infer s a -> Infer s a
 localEnv f (Infer act) = Infer (act . f)
 
--- TODO: bench inlining of ref operations
-
+{-# INLINE newRef #-}
 newRef :: a -> Infer s (RefZone.Ref a)
 newRef x =
     do
         zone <- askEnv <&> envZone
         RefZone.newRef zone x & liftST
 
+{-# INLINE readRef #-}
 readRef :: RefZone.Ref b -> Infer s b
 readRef ref =
     do
         zone <- askEnv <&> envZone
         RefZone.readRef zone ref & liftST
 
+{-# INLINE writeRef #-}
 writeRef :: RefZone.Ref a -> a -> Infer s ()
 writeRef ref val =
     do
         zone <- askEnv <&> envZone
         RefZone.writeRef zone ref val & liftST
 
+{-# INLINE writePos #-}
 writePos :: MetaVar tag -> IsBound tag (MetaTypeAST tag) -> Infer s ()
 writePos pos x = writeRef (metaVarRef pos) x
 
@@ -177,6 +179,7 @@ nextFresh =
         return new
     & liftST
 
+{-# INLINE freshPos #-}
 freshPos :: Constraints tag -> Infer s (MetaVar tag)
 freshPos cs = Unbound cs & newRef <&> MetaVar
 
