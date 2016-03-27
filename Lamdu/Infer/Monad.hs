@@ -203,10 +203,12 @@ repr x =
                 LinkFinal final -> return (ref, final)
                 Link innerRef ->
                     do
-                        res@(_, link) <- go innerRef
+                        (preFinal, final) <- go innerRef
                         -- path compression:
-                        RefZone.writeRef zone ref (LinkFinal link)
-                        return res
+                        -- Point to the pre-final link, so that the
+                        -- Final isn't copied but shared.
+                        RefZone.writeRef zone ref (Link preFinal)
+                        return (preFinal, final)
         liftST $ go x
 
 schemeBindersSingleton :: forall tag. IsTag tag => TVarName tag -> Constraints tag -> SchemeBinders
