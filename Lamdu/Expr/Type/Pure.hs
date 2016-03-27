@@ -50,7 +50,7 @@ compositeFrom ((name, typ):fs) = T $ Type.TCompositeExtend name typ $ compositeF
 recordType :: [(Tag, T 'TypeT)] -> T 'TypeT
 recordType = T . Type.TRecord . compositeFrom
 
-tInst :: Type.TId -> Map Type.TParamId (T 'TypeT) -> T 'TypeT
+tInst :: Type.NominalId -> Map Type.TParamId (T 'TypeT) -> T 'TypeT
 tInst name params = T $ Type.TInst name params
 
 intType :: T 'TypeT

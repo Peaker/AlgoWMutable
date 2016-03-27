@@ -9,7 +9,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Lamdu.Expr.Type
-    ( TId(..), TParamId(..)
+    ( NominalId(..), TParamId(..)
     , Type, Composite
     , AST(..)
       , _TFun, _TInst, _TRecord, _TSum
@@ -34,7 +34,7 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import           Prelude.Compat
 
-newtype TId = TId { _tid :: Identifier }
+newtype NominalId = NominalId { _nominalId :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
 newtype TParamId = TParamId { _tParamId :: Identifier }
@@ -42,7 +42,7 @@ newtype TParamId = TParamId { _tParamId :: Identifier }
 
 data AST tag ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> AST 'TypeT ast
-    TInst :: {-# UNPACK #-}!TId -> !(Map TParamId (ast 'TypeT)) -> AST 'TypeT ast
+    TInst :: {-# UNPACK #-}!NominalId -> !(Map TParamId (ast 'TypeT)) -> AST 'TypeT ast
     TRecord :: !(ast RecordT) -> AST 'TypeT ast
     TSum :: !(ast SumT) -> AST 'TypeT ast
     TEmptyComposite :: IsCompositeTag c => AST ('CompositeT c) ast
@@ -91,7 +91,7 @@ _TFun = Lens.prism' (uncurry TFun) $ \case
     _ -> Nothing
 
 {-# INLINE _TInst #-}
-_TInst :: Lens.Prism' (Type ast) (TId, Map TParamId (ast 'TypeT))
+_TInst :: Lens.Prism' (Type ast) (NominalId, Map TParamId (ast 'TypeT))
 _TInst = Lens.prism' (uncurry TInst) $ \case
     TInst n p -> Just (n, p)
     _ -> Nothing
