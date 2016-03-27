@@ -21,7 +21,6 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
-import           Lamdu.Expr.Type.Pure (TVarName)
 import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
@@ -34,7 +33,7 @@ data IsBound tag bound
 Lens.makePrisms ''IsBound
 
 data MetaVar tag = MetaVar
-    { __unificationPosNames :: Set (TVarName tag)
+    { __unificationPosNames :: Set Int
       -- TODO: Remove names, use mutable bit/level instead
     , __unificationPosRef :: RefZone.Ref (IsBound tag (MetaTypeAST tag))
     }

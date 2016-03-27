@@ -170,16 +170,12 @@ nextFresh =
         return new
     & liftST
 
-{-# INLINE freshTVarName #-}
-freshTVarName :: Infer s (TVarName tag)
-freshTVarName = nextFresh <&> TVarName
-
 freshPos :: Constraints tag -> Infer s (MetaVar tag)
 freshPos cs =
     do
-        tvarName <- freshTVarName
+        posName <- nextFresh
         ref <- Unbound cs & newRef
-        MetaVar (Set.singleton tvarName) ref & return
+        MetaVar (Set.singleton posName) ref & return
 
 {-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (MetaTypeAST tag)
@@ -237,20 +233,21 @@ deref ::
 deref visited = \case
     MetaTypeAST ast ->
         ast & Type.ntraverse (deref visited) (deref visited) (deref visited) <&> T
-    MetaTypeVar (MetaVar names tvRef)
-        | _tVarName tvName `Set.member` visited ->
+    MetaTypeVar (MetaVar posNames tvRef)
+        | posName `Set.member` visited ->
               throwError InfiniteType & lift
         | otherwise ->
             -- TODO: Avoid Infer s monad and use ST directly?
             lift (readRef tvRef) >>= \case
             Unbound cs ->
                 do
+                    let tvName = TVarName posName
                     tell $ schemeBindersSingleton tvName cs
                     return $ TVar tvName
             Bound meta ->
-                deref (Set.insert (_tVarName tvName) visited) meta
+                deref (Set.insert posName visited) meta
         where
-            tvName = Set.findMin names
+            posName = Set.findMin posNames
 
 generalize :: MetaType -> Infer s (Scheme 'TypeT)
 generalize t =
