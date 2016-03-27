@@ -13,7 +13,7 @@ module Lamdu.Infer.Monad
     , runInfer
     , repr
     , freshRef
-    , writeRef
+    , readRef, writeRef
     , freshMetaVar
     , localScope
     , lookupGlobal, lookupLocal
@@ -133,6 +133,12 @@ newRef x =
     do
         zone <- askEnv <&> envZone
         RefZone.newRef zone x & liftST
+
+readRef :: RefZone.Ref b -> Infer s b
+readRef ref =
+    do
+        zone <- askEnv <&> envZone
+        RefZone.readRef zone ref & liftST
 
 {-# INLINE writeRef #-}
 writeRef :: RefZone.Ref a -> a -> Infer s ()
