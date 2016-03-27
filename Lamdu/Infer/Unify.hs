@@ -92,7 +92,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
             Set.toList duplicates
         case innerTail of
             CompositeTailClosed -> return ()
-            CompositeTailOpen (MetaVar _ ref) innerConstraints ->
+            CompositeTailOpen (MetaVar ref) innerConstraints ->
                 M.writeRef ref $ Unbound $ outerConstraints `mappend` innerConstraints
     where
         duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
@@ -193,8 +193,8 @@ unify f (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST f u v
 unify f (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST f v u
 unify f (MetaTypeVar u) (MetaTypeVar v) =
     do
-        (uPos@(MetaVar _ uRef), ur) <- M.repr u
-        (vPos@(MetaVar _ vRef), vr) <- M.repr v
+        (uPos@(MetaVar uRef), ur) <- M.repr u
+        (vPos@(MetaVar vRef), vr) <- M.repr v
         -- TODO: Choose which to link into which weight/level-wise
         let link a b =
                 -- TODO: Update the "names"? They should die!

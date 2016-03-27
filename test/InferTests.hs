@@ -115,4 +115,5 @@ tests =
     , example11
     ]
 
+main :: IO ()
 main = print tests

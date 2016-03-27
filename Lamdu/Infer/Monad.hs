@@ -20,17 +20,24 @@ module Lamdu.Infer.Monad
     , instantiate, generalize
     ) where
 
+import           Control.Lens (Lens')
+import qualified Control.Lens as Lens
 import           Control.Lens.Operators
+import           Control.Lens.Tuple
+import           Control.Monad (when)
+import qualified Control.Monad.RSS as RSS
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
-import           Control.Monad.Trans.WriterT (WriterT, runWriterT, tell)
+import           Control.Monad.Trans.RSS (RSST, runRSST)
 import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import           Data.RefZone (Zone)
 import qualified Data.RefZone as RefZone
+import           Data.RefZone.RefMap (RefMap)
+import qualified Data.RefZone.RefMap as RefMap
+import           Data.RefZone.RefSet (RefSet)
+import qualified Data.RefZone.RefSet as RefSet
 import           Data.STRef
-import           Data.Set (Set)
-import qualified Data.Set as Set
 import           Lamdu.Expr.Identifier (Tag(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
@@ -39,7 +46,7 @@ import           Lamdu.Expr.Type.Pure (T(..), TVarName(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), ASTTagEquality(..), IsTag(..)
-    , CompositeTagEquality(..) )
+    , CompositeTagEquality(..), RecordT, SumT )
 import           Lamdu.Expr.Val (Var)
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
@@ -140,7 +147,7 @@ writeRef ref val =
         RefZone.writeRef zone ref val & liftST
 
 writePos :: MetaVar tag -> IsBound tag (MetaTypeAST tag) -> Infer s ()
-writePos pos x = writeRef (__unificationPosRef pos) x
+writePos pos x = writeRef (metaVarRef pos) x
 
 {-# INLINE localScope #-}
 localScope ::
@@ -171,11 +178,7 @@ nextFresh =
     & liftST
 
 freshPos :: Constraints tag -> Infer s (MetaVar tag)
-freshPos cs =
-    do
-        posName <- nextFresh
-        ref <- Unbound cs & newRef
-        MetaVar (Set.singleton posName) ref & return
+freshPos cs = Unbound cs & newRef <&> MetaVar
 
 {-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (MetaTypeAST tag)
@@ -204,7 +207,7 @@ repr ::
 repr x =
     do
         zone <- askEnv <&> envZone
-        let go pos@(MetaVar _ ref) =
+        let go pos@(MetaVar ref) =
                 RefZone.readRef zone ref >>= \case
                 Unbound uCs -> return (pos, Unbound uCs)
                 Bound (MetaTypeAST ast) -> return (pos, Bound ast)
@@ -225,31 +228,41 @@ schemeBindersSingleton (TVarName tvName) cs =
     where
         binders = IntMap.singleton tvName cs
 
-deref ::
-    forall s tag. IsTag tag =>
-    Set Int -> MetaTypeAST tag -> WriterT SchemeBinders (Infer s) (T tag)
-deref visited = \case
+type DerefCache = (RefMap (T 'TypeT), RefMap (T RecordT), RefMap (T SumT))
+type Deref s = RSST RefSet SchemeBinders DerefCache (Infer s)
+
+derefCache :: forall tag. IsTag tag => RefZone.Ref (IsBound tag (MetaTypeAST tag)) -> Lens' DerefCache (Maybe (T tag))
+derefCache tag =
+    ( case (tagRefl :: ASTTagEquality tag) of
+      IsTypeT                -> _1
+      IsCompositeT IsRecordC -> _2
+      IsCompositeT IsSumC    -> _3
+    ) . RefMap.at tag
+
+deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
+deref = \case
     MetaTypeAST ast ->
-        ast & Type.ntraverse (deref visited) (deref visited) (deref visited) <&> T
-    MetaTypeVar (MetaVar posNames tvRef)
-        | posName `Set.member` visited ->
-              throwError InfiniteType & lift
-        | otherwise ->
-            -- TODO: Avoid Infer s monad and use ST directly?
-            lift (readRef tvRef) >>= \case
-            Unbound cs ->
-                do
-                    let tvName = TVarName posName
-                    tell $ schemeBindersSingleton tvName cs
-                    return $ TVar tvName
-            Bound meta ->
-                deref (Set.insert posName visited) meta
-        where
-            posName = Set.findMin posNames
+        ast & Type.ntraverse deref deref deref <&> T
+    MetaTypeVar (MetaVar tvRef) ->
+        do
+            visited <- RSS.ask
+            when (tvRef `RefSet.isMember` visited) $
+                lift (throwError InfiniteType)
+            cached <- Lens.use (derefCache tvRef)
+            case cached of
+                Just t -> pure t
+                Nothing ->
+                    lift (readRef tvRef) >>= \case
+                    Unbound cs ->
+                        do
+                            tvName <- nextFresh <&> TVarName & lift
+                            schemeBindersSingleton tvName cs & RSS.tell
+                            return $ TVar tvName
+                    Bound meta -> deref meta & RSS.local (RefSet.insert tvRef)
+                >>= (derefCache tvRef <?=)
 
 generalize :: MetaType -> Infer s (Scheme 'TypeT)
 generalize t =
     {-# SCC "generalize" #-}
-    deref Set.empty t
-    & runWriterT
-    <&> uncurry (flip Scheme)
+    runRSST (deref t) mempty mempty
+    <&> (\(x, _, w) -> Scheme w x)

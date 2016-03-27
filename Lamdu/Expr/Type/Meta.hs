@@ -17,8 +17,6 @@ import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Data.Monoid ((<>))
 import qualified Data.RefZone as RefZone
-import           Data.Set (Set)
-import qualified Data.Set as Set
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Tag (ASTTag(..))
@@ -32,15 +30,10 @@ data IsBound tag bound
     deriving (Functor, Foldable, Traversable)
 Lens.makePrisms ''IsBound
 
-data MetaVar tag = MetaVar
-    { __unificationPosNames :: Set Int
-      -- TODO: Remove names, use mutable bit/level instead
-    , __unificationPosRef :: RefZone.Ref (IsBound tag (MetaTypeAST tag))
-    }
+newtype MetaVar tag = MetaVar { metaVarRef :: RefZone.Ref (IsBound tag (MetaTypeAST tag)) }
 
-instance NFData (MetaVar tag) where rnf (MetaVar x y) = rnf x `seq` rnf y
-instance Pretty (MetaVar tag) where
-    pPrint (MetaVar names _) = "?" <> pPrint (Set.toList names)
+instance NFData (MetaVar tag) where rnf (MetaVar r) = rnf r
+instance Pretty (MetaVar tag) where pPrint (MetaVar r) = "?" <> pPrint r
 
 -- | Type.AST fixpoint that adds meta-variables
 data MetaTypeAST tag
