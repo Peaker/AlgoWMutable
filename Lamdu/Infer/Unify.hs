@@ -26,7 +26,7 @@ import           Lamdu.Expr.Type (Type, Composite, AST(..), TParamId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Meta
-import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..), IsCompositeTag(..))
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import qualified Lamdu.Infer.Monad as M
 import           Pretty.Map ()
 import           Pretty.Utils (intercalate)
@@ -184,7 +184,7 @@ unifyCompositeAST u v =
             & sequenceA_
 
 unify ::
-    (IsTag tag, Monoid (Constraints tag)) =>
+    (Monoid (Constraints tag)) =>
     (AST tag MetaTypeAST ->
      AST tag MetaTypeAST -> M.Infer s ()) ->
     MetaTypeAST tag -> MetaTypeAST tag -> M.Infer s ()
@@ -221,7 +221,7 @@ unifyUnbound pos cs ast =
         M.writePos pos $ Bound (MetaTypeAST ast)
 
 unifyVarAST ::
-    (IsTag tag, Monoid (Constraints tag)) =>
+    (Monoid (Constraints tag)) =>
     (AST tag MetaTypeAST ->
      AST tag MetaTypeAST -> M.Infer s ()) ->
     AST tag MetaTypeAST -> MetaVar tag -> M.Infer s ()
