@@ -1,16 +1,14 @@
+{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE TemplateHaskell #-}
 -- | Types with meta-variables
 
 module Lamdu.Expr.Type.Meta
-    ( IsBound(..), MetaVar(..), MetaTypeAST(..), MetaType, MetaComposite
+    ( IsBound(..), _Unbound, _Bound
+    , MetaVar(..), MetaTypeAST(..), MetaType, MetaComposite
     ) where
 
 import           Control.DeepSeq (NFData(..))
@@ -22,12 +20,9 @@ import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
-import           Prelude.Compat
-
 data IsBound tag bound
     = Unbound (Constraints tag)
     | Bound bound
-    deriving (Functor, Foldable, Traversable)
 Lens.makePrisms ''IsBound
 
 newtype MetaVar tag = MetaVar { metaVarRef :: RefZone.Ref (IsBound tag (MetaTypeAST tag)) }

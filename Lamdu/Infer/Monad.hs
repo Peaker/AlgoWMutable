@@ -41,7 +41,8 @@ import           Data.STRef
 import           Lamdu.Expr.Identifier (Tag(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
-import           Lamdu.Expr.Type.Meta (MetaType, MetaVar(..), MetaTypeAST(..), IsBound(..))
+import           Lamdu.Expr.Type.Meta
+    ( MetaType, MetaVar(..), MetaTypeAST(..), IsBound(..), _Bound )
 import           Lamdu.Expr.Type.Pure (T(..), TVarName(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
 import           Lamdu.Expr.Type.Tag
@@ -216,9 +217,9 @@ repr x =
                 Bound (MetaTypeAST ast) -> return (pos, Bound ast)
                 Bound (MetaTypeVar innerPos) ->
                     do
-                        res <- go innerPos
+                        res@(_, isBound) <- go innerPos
                         -- path compression:
-                        RefZone.writeRef zone ref (snd res <&> MetaTypeAST)
+                        isBound & _Bound %~ MetaTypeAST & RefZone.writeRef zone ref
                         return res
         liftST $ go x
 
