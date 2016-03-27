@@ -132,7 +132,7 @@ inferRecExtend (Val.RecExtend name val rest) =
             M.repr pos >>= \case
             (_, Bound ast) -> propagateConstraintBound ast
             (vPos, Unbound (CompositeConstraints cs)) ->
-                M.writePos vPos $ Unbound $ CompositeConstraints $
+                M.writePos vPos $ LinkFinal $ Unbound $ CompositeConstraints $
                 Set.insert name cs
         propagateConstraintBound TEmptyComposite = return ()
         propagateConstraintBound (TCompositeExtend fieldTag _ restTyp)

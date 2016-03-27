@@ -93,7 +93,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
         case innerTail of
             CompositeTailClosed -> return ()
             CompositeTailOpen (MetaVar ref) innerConstraints ->
-                M.writeRef ref $ Unbound $ outerConstraints `mappend` innerConstraints
+                M.writeRef ref $ LinkFinal $ Unbound $ outerConstraints `mappend` innerConstraints
     where
         duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
         FlatComposite innerFields innerTail = flatComposite
@@ -111,7 +111,9 @@ writeCompositeTail ::
 writeCompositeTail (pos, cs) composite =
     do
         {-# SCC "flatConstraintsCheck" #-}flatConstraintsCheck cs composite
-        M.writePos pos $ Bound $ unflatten composite
+        M.writePos pos $ case unflatten composite of
+            MetaTypeAST ast -> LinkFinal $ Bound ast
+            MetaTypeVar var -> Link var
 
 {-# INLINE unifyCompositesOpenClosed #-}
 unifyCompositesOpenClosed ::
@@ -199,13 +201,13 @@ unify f (MetaTypeVar u) (MetaTypeVar v) =
         (uPos@(MetaVar uRef), ur) <- M.repr u
         (vPos@(MetaVar vRef), vr) <- M.repr v
         -- TODO: Choose which to link into which weight/level-wise
-        let link a b = M.writePos a $ Bound $ MetaTypeVar b
+        let link a b = M.writePos a $ Link b
         unless (uRef == vRef) $
             case (ur, vr) of
             (Unbound uCs, Unbound vCs) ->
                 do
                     link uPos vPos
-                    M.writeRef vRef $ Unbound $ uCs `mappend` vCs
+                    M.writeRef vRef $ LinkFinal $ Unbound $ uCs `mappend` vCs
             (Unbound uCs, Bound vAst) -> unifyUnbound uPos uCs vAst
             (Bound uAst, Unbound vCs) -> unifyUnbound vPos vCs uAst
             (Bound uAst, Bound vAst) ->
@@ -219,7 +221,7 @@ unifyUnbound ::
 unifyUnbound pos cs ast =
     do
         {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
-        M.writePos pos $ Bound (MetaTypeAST ast)
+        M.writePos pos $ LinkFinal $ Bound ast
 
 unifyVarAST ::
     (Monoid (Constraints tag)) =>

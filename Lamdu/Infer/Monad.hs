@@ -42,7 +42,7 @@ import           Lamdu.Expr.Identifier (Tag(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Meta
-    ( MetaType, MetaVar(..), MetaTypeAST(..), IsBound(..), _Bound )
+    ( MetaType, MetaVar(..), MetaTypeAST(..), Link(..), Final(..) )
 import           Lamdu.Expr.Type.Pure (T(..), TVarName(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
 import           Lamdu.Expr.Type.Tag
@@ -134,13 +134,6 @@ newRef x =
         zone <- askEnv <&> envZone
         RefZone.newRef zone x & liftST
 
-{-# INLINE readRef #-}
-readRef :: RefZone.Ref b -> Infer s b
-readRef ref =
-    do
-        zone <- askEnv <&> envZone
-        RefZone.readRef zone ref & liftST
-
 {-# INLINE writeRef #-}
 writeRef :: RefZone.Ref a -> a -> Infer s ()
 writeRef ref val =
@@ -149,7 +142,7 @@ writeRef ref val =
         RefZone.writeRef zone ref val & liftST
 
 {-# INLINE writePos #-}
-writePos :: MetaVar tag -> IsBound tag (MetaTypeAST tag) -> Infer s ()
+writePos :: MetaVar tag -> Link tag -> Infer s ()
 writePos pos x = writeRef (metaVarRef pos) x
 
 {-# INLINE localScope #-}
@@ -182,7 +175,7 @@ nextFresh =
 
 {-# INLINE freshPos #-}
 freshPos :: Constraints tag -> Infer s (MetaVar tag)
-freshPos cs = Unbound cs & newRef <&> MetaVar
+freshPos cs = Unbound cs & LinkFinal & newRef <&> MetaVar
 
 {-# INLINE freshTVar #-}
 freshTVar :: Constraints tag -> Infer s (MetaTypeAST tag)
@@ -205,21 +198,18 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
             IsCompositeT IsRecordC -> go recordUFs
             IsCompositeT IsSumC -> go sumUFs
 
-repr ::
-    MetaVar tag ->
-    Infer s (MetaVar tag, IsBound tag (Type.AST tag MetaTypeAST))
+repr :: MetaVar tag -> Infer s (MetaVar tag, Final tag)
 repr x =
     do
         zone <- askEnv <&> envZone
         let go pos@(MetaVar ref) =
                 RefZone.readRef zone ref >>= \case
-                Unbound uCs -> return (pos, Unbound uCs)
-                Bound (MetaTypeAST ast) -> return (pos, Bound ast)
-                Bound (MetaTypeVar innerPos) ->
+                LinkFinal final -> return (pos, final)
+                Link innerPos ->
                     do
-                        res@(_, isBound) <- go innerPos
+                        res@(_, link) <- go innerPos
                         -- path compression:
-                        isBound & _Bound %~ MetaTypeAST & RefZone.writeRef zone ref
+                        RefZone.writeRef zone ref (LinkFinal link)
                         return res
         liftST $ go x
 
@@ -235,37 +225,37 @@ schemeBindersSingleton (TVarName tvName) cs =
 type DerefCache = (RefMap (T 'TypeT), RefMap (T RecordT), RefMap (T SumT))
 type Deref s = RSST RefSet SchemeBinders DerefCache (Infer s)
 
-derefCache :: forall tag. IsTag tag => RefZone.Ref (IsBound tag (MetaTypeAST tag)) -> Lens' DerefCache (Maybe (T tag))
+derefCache :: forall tag. IsTag tag => RefZone.Ref (Link tag) -> Lens' DerefCache (Maybe (T tag))
 derefCache tag =
     ( case (tagRefl :: ASTTagEquality tag) of
       IsTypeT                -> _1
       IsCompositeT IsRecordC -> _2
       IsCompositeT IsSumC    -> _3
     ) . RefMap.at tag
-
-deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
-deref = \case
-    MetaTypeAST ast -> derefAST ast
-    MetaTypeVar var -> derefVar var
-
 derefVar :: IsTag tag => MetaVar tag -> Deref s (T tag)
-derefVar (MetaVar tvRef) =
+derefVar var =
     do
+        (MetaVar pos, final) <- lift (repr var)
         visited <- RSS.ask
-        when (tvRef `RefSet.isMember` visited) $
+        when (pos `RefSet.isMember` visited) $
             lift (throwError InfiniteType)
-        cached <- Lens.use (derefCache tvRef)
+        cached <- Lens.use (derefCache pos)
         case cached of
             Just t -> pure t
             Nothing ->
-                lift (readRef tvRef) >>= \case
+                case final of
+                Bound ast -> derefAST ast & RSS.local (RefSet.insert pos)
                 Unbound cs ->
                     do
                         tvName <- nextFresh <&> TVarName & lift
                         schemeBindersSingleton tvName cs & RSS.tell
                         return $ TVar tvName
-                Bound meta -> deref meta & RSS.local (RefSet.insert tvRef)
-            >>= (derefCache tvRef <?=)
+            >>= (derefCache pos <?=)
+
+deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
+deref = \case
+    MetaTypeAST ast -> derefAST ast
+    MetaTypeVar var -> derefVar var
 
 derefAST :: IsTag tag => Type.AST tag MetaTypeAST -> Deref s (T tag)
 derefAST = fmap T . Type.ntraverse deref deref deref

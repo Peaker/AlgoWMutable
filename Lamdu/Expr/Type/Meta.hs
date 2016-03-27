@@ -7,7 +7,8 @@
 -- | Types with meta-variables
 
 module Lamdu.Expr.Type.Meta
-    ( IsBound(..), _Unbound, _Bound
+    ( Final(..), _Unbound, _Bound
+    , Link(..), _LinkFinal, _Link
     , MetaVar(..), MetaTypeAST(..), MetaType, MetaComposite
     ) where
 
@@ -20,12 +21,16 @@ import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
-data IsBound tag bound
+data Final tag
     = Unbound (Constraints tag)
-    | Bound bound
-Lens.makePrisms ''IsBound
+    | Bound (Type.AST tag MetaTypeAST)
 
-newtype MetaVar tag = MetaVar { metaVarRef :: RefZone.Ref (IsBound tag (MetaTypeAST tag)) }
+data Link tag
+    = LinkFinal (Final tag)
+    | Link (MetaVar tag)
+
+-- TODO: Remove this newtype?
+newtype MetaVar tag = MetaVar { metaVarRef :: RefZone.Ref (Link tag) }
 
 instance NFData (MetaVar tag) where rnf (MetaVar r) = rnf r
 instance Pretty (MetaVar tag) where pPrint (MetaVar r) = "?" <> pPrint r
@@ -41,6 +46,8 @@ instance Pretty (Type.AST tag MetaTypeAST) => Pretty (MetaTypeAST tag) where
     pPrint (MetaTypeVar pos) = pPrint pos
     pPrint (MetaTypeAST t) = pPrint t
 
+Lens.makePrisms ''Link
+Lens.makePrisms ''Final
 Lens.makeLenses ''MetaVar
 
 type MetaType = MetaTypeAST 'TypeT
