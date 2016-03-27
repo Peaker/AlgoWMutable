@@ -138,6 +138,9 @@ instance (Pretty (ast 'TypeT),
         TRecord r -> pPrintPrec level prec r
         TSum s -> pPrintPrec level prec s
 
+-- This pretty instance is separate because we want to be able to have
+-- the "c" type-var in the instance context, which is impossible if we
+-- don't know that we're an instance of a composite in the first-place
 instance (IsCompositeTag c,
           Pretty (ast 'TypeT),
           Pretty (ast ('CompositeT c))) =>
