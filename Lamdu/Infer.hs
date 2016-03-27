@@ -86,10 +86,10 @@ inferApp (Val.App fun arg) =
         (arg', argTyp) <- infer arg
         resTyp <-
             case funTyp of
-            MetaTypeVar pos ->
+            MetaTypeVar ref ->
                 do
                     resTyp <- M.freshTVar TypeConstraints
-                    unifyVarAST unifyTypeAST (TFun argTyp resTyp) pos
+                    unifyVarAST unifyTypeAST (TFun argTyp resTyp) ref
                     return resTyp
             MetaTypeAST (TFun paramTyp resTyp) ->
                 do
@@ -106,13 +106,13 @@ inferRecExtend (Val.RecExtend name val rest) =
         (rest', restTyp) <- infer rest
         restRecordTyp <-
             case restTyp of
-            MetaTypeVar pos ->
+            MetaTypeVar ref ->
                 do
                     unknownRestFields <-
                         M.freshTVar $ CompositeConstraints $
                         Set.singleton name
-                    -- TODO (Optimization): pos known to be unbound
-                    unifyVarAST unifyTypeAST (TRecord unknownRestFields) pos
+                    -- TODO (Optimization): ref known to be unbound
+                    unifyVarAST unifyTypeAST (TRecord unknownRestFields) ref
                     return unknownRestFields
             MetaTypeAST (TRecord restRecordTyp) ->
                 do
@@ -128,11 +128,11 @@ inferRecExtend (Val.RecExtend name val rest) =
             & return
     where
         propagateConstraint (MetaTypeAST x) = propagateConstraintBound x
-        propagateConstraint (MetaTypeVar pos) =
-            M.repr pos >>= \case
+        propagateConstraint (MetaTypeVar ref) =
+            M.repr ref >>= \case
             (_, Bound ast) -> propagateConstraintBound ast
-            (vPos, Unbound (CompositeConstraints cs)) ->
-                M.writePos vPos $ LinkFinal $ Unbound $ CompositeConstraints $
+            (vRef, Unbound (CompositeConstraints cs)) ->
+                M.writeRef vRef $ LinkFinal $ Unbound $ CompositeConstraints $
                 Set.insert name cs
         propagateConstraintBound TEmptyComposite = return ()
         propagateConstraintBound (TCompositeExtend fieldTag _ restTyp)

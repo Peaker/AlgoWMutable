@@ -9,12 +9,11 @@
 module Lamdu.Expr.Type.Meta
     ( Final(..), _Unbound, _Bound
     , Link(..), _LinkFinal, _Link
-    , MetaVar(..), MetaTypeAST(..), MetaType, MetaComposite
+    , MetaVar, MetaTypeAST(..), MetaType, MetaComposite
     ) where
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
-import           Data.Monoid ((<>))
 import qualified Data.RefZone as RefZone
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
@@ -29,11 +28,7 @@ data Link tag
     = LinkFinal (Final tag)
     | Link (MetaVar tag)
 
--- TODO: Remove this newtype?
-newtype MetaVar tag = MetaVar { metaVarRef :: RefZone.Ref (Link tag) }
-
-instance NFData (MetaVar tag) where rnf (MetaVar r) = rnf r
-instance Pretty (MetaVar tag) where pPrint (MetaVar r) = "?" <> pPrint r
+type MetaVar tag = RefZone.Ref (Link tag)
 
 -- | Type.AST fixpoint that adds meta-variables
 data MetaTypeAST tag
@@ -48,7 +43,6 @@ instance Pretty (Type.AST tag MetaTypeAST) => Pretty (MetaTypeAST tag) where
 
 Lens.makePrisms ''Link
 Lens.makePrisms ''Final
-Lens.makeLenses ''MetaVar
 
 type MetaType = MetaTypeAST 'TypeT
 type MetaComposite c = MetaTypeAST ('CompositeT c)

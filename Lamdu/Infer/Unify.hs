@@ -57,9 +57,9 @@ flattenVal (TCompositeExtend n t r) =
 
 flatten :: MetaComposite c -> M.Infer s (FlatComposite c)
 flatten (MetaTypeAST ast) = flattenVal ast
-flatten (MetaTypeVar pos) =
-    M.repr pos >>= \case
-    (_, Unbound cs) -> return $ FlatComposite Map.empty $ CompositeTailOpen pos cs
+flatten (MetaTypeVar ref) =
+    M.repr ref >>= \case
+    (_, Unbound cs) -> return $ FlatComposite Map.empty $ CompositeTailOpen ref cs
     (_, Bound ast) -> flattenVal ast
 
 unflatten :: IsCompositeTag c => FlatComposite c -> MetaComposite c
@@ -68,7 +68,7 @@ unflatten (FlatComposite fields tail) =
     where
         go [] = case tail of
             CompositeTailClosed -> MetaTypeAST TEmptyComposite
-            CompositeTailOpen pos _ -> MetaTypeVar pos
+            CompositeTailOpen ref _ -> MetaTypeVar ref
         go ((name, typ):fs) =
             go fs & TCompositeExtend name typ & MetaTypeAST
 
@@ -92,7 +92,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
             Set.toList duplicates
         case innerTail of
             CompositeTailClosed -> return ()
-            CompositeTailOpen (MetaVar ref) innerConstraints ->
+            CompositeTailOpen ref innerConstraints ->
                 M.writeRef ref $ LinkFinal $ Unbound $ outerConstraints `mappend` innerConstraints
     where
         duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
@@ -108,10 +108,10 @@ writeCompositeTail ::
     IsCompositeTag c =>
     (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
     FlatComposite c -> M.Infer s ()
-writeCompositeTail (pos, cs) composite =
+writeCompositeTail (ref, cs) composite =
     do
         {-# SCC "flatConstraintsCheck" #-}flatConstraintsCheck cs composite
-        M.writePos pos $ case unflatten composite of
+        M.writeRef ref $ case unflatten composite of
             MetaTypeAST ast -> LinkFinal $ Bound ast
             MetaTypeVar var -> Link var
 
@@ -120,9 +120,9 @@ unifyCompositesOpenClosed ::
     IsCompositeTag c =>
     (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     CompositeFields -> M.Infer s ()
-unifyCompositesOpenClosed (openTailPos, openConstraints, openFields) closedFields
+unifyCompositesOpenClosed (openTailRef, openConstraints, openFields) closedFields
     | Map.null uniqueOpenFields =
-          writeCompositeTail (openTailPos, openConstraints) $
+          writeCompositeTail (openTailRef, openConstraints) $
           FlatComposite uniqueClosedFields CompositeTailClosed
     | otherwise =
           M.throwError $
@@ -139,11 +139,11 @@ unifyCompositesOpenOpen ::
     (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     M.Infer s ()
-unifyCompositesOpenOpen (uPos, uCs, uFields) (vPos, vCs, vFields) =
+unifyCompositesOpenOpen (uRef, uCs, uFields) (vRef, vCs, vFields) =
     do
-        commonRest <- M.freshPos cs <&> (`CompositeTailOpen` cs)
-        writeCompositeTail (uPos, uCs) $ FlatComposite uniqueVFields commonRest
-        writeCompositeTail (vPos, vCs) $ FlatComposite uniqueUFields commonRest
+        commonRest <- M.freshRef cs <&> (`CompositeTailOpen` cs)
+        writeCompositeTail (uRef, uCs) $ FlatComposite uniqueVFields commonRest
+        writeCompositeTail (vRef, vCs) $ FlatComposite uniqueUFields commonRest
     where
         cs = uCs `mappend` vCs
         uniqueUFields = uFields `Map.difference` vFields
@@ -177,12 +177,12 @@ unifyCompositeAST u v =
         case (uTail, vTail) of
             (CompositeTailClosed, CompositeTailClosed) ->
                 {-# SCC "unifyCompositesClosedClosed" #-}unifyCompositesClosedClosed uFields vFields
-            (CompositeTailOpen uPos uCs, CompositeTailClosed) ->
-                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (uPos, uCs, uFields) vFields
-            (CompositeTailClosed, CompositeTailOpen vPos vCs) ->
-                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (vPos, vCs, vFields) uFields
-            (CompositeTailOpen uPos uCs, CompositeTailOpen vPos vCs) ->
-                {-# SCC "unifyCompositesOpenOpen" #-}unifyCompositesOpenOpen (uPos, uCs, uFields) (vPos, vCs, vFields)
+            (CompositeTailOpen uRef uCs, CompositeTailClosed) ->
+                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (uRef, uCs, uFields) vFields
+            (CompositeTailClosed, CompositeTailOpen vRef vCs) ->
+                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (vRef, vCs, vFields) uFields
+            (CompositeTailOpen uRef uCs, CompositeTailOpen vRef vCs) ->
+                {-# SCC "unifyCompositesOpenOpen" #-}unifyCompositesOpenOpen (uRef, uCs, uFields) (vRef, vCs, vFields)
         -- We intersect-unify AFTER unifying the composite shapes, so
         -- we know the flat composites are accurate
         Map.intersectionWith unifyType uFields vFields
@@ -198,30 +198,30 @@ unify f (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST f u v
 unify f (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST f v u
 unify f (MetaTypeVar u) (MetaTypeVar v) =
     do
-        (uPos@(MetaVar uRef), ur) <- M.repr u
-        (vPos@(MetaVar vRef), vr) <- M.repr v
+        (uRef, ur) <- M.repr u
+        (vRef, vr) <- M.repr v
         -- TODO: Choose which to link into which weight/level-wise
-        let link a b = M.writePos a $ Link b
+        let link a b = M.writeRef a $ Link b
         unless (uRef == vRef) $
             case (ur, vr) of
             (Unbound uCs, Unbound vCs) ->
                 do
-                    link uPos vPos
+                    link uRef vRef
                     M.writeRef vRef $ LinkFinal $ Unbound $ uCs `mappend` vCs
-            (Unbound uCs, Bound vAst) -> unifyUnbound uPos uCs vAst
-            (Bound uAst, Unbound vCs) -> unifyUnbound vPos vCs uAst
+            (Unbound uCs, Bound vAst) -> unifyUnbound uRef uCs vAst
+            (Bound uAst, Unbound vCs) -> unifyUnbound vRef vCs uAst
             (Bound uAst, Bound vAst) ->
                 do
-                    link uPos vPos
+                    link uRef vRef
                     f uAst vAst
 
 unifyUnbound ::
     MetaVar tag -> Constraints tag -> AST tag MetaTypeAST ->
     M.Infer s ()
-unifyUnbound pos cs ast =
+unifyUnbound ref cs ast =
     do
         {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
-        M.writePos pos $ LinkFinal $ Bound ast
+        M.writeRef ref $ LinkFinal $ Bound ast
 
 unifyVarAST ::
     (Monoid (Constraints tag)) =>
@@ -231,7 +231,7 @@ unifyVarAST ::
 unifyVarAST f uAst v =
     M.repr v >>= \case
     (_, Bound vAst) -> f uAst vAst
-    (vPos, Unbound vCs) -> unifyUnbound vPos vCs uAst
+    (vRef, Unbound vCs) -> unifyUnbound vRef vCs uAst
 
 unifyTInstParams ::
     M.Err -> Map TParamId MetaType -> Map TParamId MetaType -> M.Infer s ()
