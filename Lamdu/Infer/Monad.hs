@@ -24,8 +24,8 @@ import           Control.Lens.Operators
 import           Control.Monad.ST (ST, runST)
 import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.WriterT (WriterT, runWriterT, tell)
-import           Data.Map (Map)
-import qualified Data.Map as Map
+import           Data.IntMap (IntMap)
+import qualified Data.IntMap as IntMap
 import           Data.RefZone (Zone)
 import qualified Data.RefZone as RefZone
 import           Data.STRef
@@ -188,10 +188,8 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
         typeUFs <- {-# SCC "instantiate.freshtvs" #-}traverse freshTVar typeVars
         recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshTVar recordVars
         sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshTVar sumVars
-        let go ::
-                Map (TVarName t) (MetaTypeAST t) ->
-                T t -> Infer s (MetaTypeAST t)
-            go binders (TVar tvarName) = return (binders Map.! tvarName)
+        let go :: IntMap (MetaTypeAST t) -> T t -> Infer s (MetaTypeAST t)
+            go binders (TVar (TVarName i)) = return (binders IntMap.! i)
             go _ (T typeAST) =
                 Type.ntraverse (go typeUFs) (go recordUFs) (go sumUFs) typeAST
                 <&> MetaTypeAST
@@ -219,13 +217,13 @@ repr x =
         liftST $ go x
 
 schemeBindersSingleton :: forall tag. IsTag tag => TVarName tag -> Constraints tag -> SchemeBinders
-schemeBindersSingleton tvName cs =
+schemeBindersSingleton (TVarName tvName) cs =
     case tagRefl :: ASTTagEquality tag of
     IsTypeT -> mempty { schemeTypeBinders = binders }
     IsCompositeT IsRecordC -> mempty { schemeRecordBinders = binders }
     IsCompositeT IsSumC -> mempty { schemeSumBinders = binders }
     where
-        binders = Map.singleton tvName cs
+        binders = IntMap.singleton tvName cs
 
 deref ::
     forall s tag. IsTag tag =>
