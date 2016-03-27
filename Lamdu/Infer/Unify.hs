@@ -196,9 +196,7 @@ unify f (MetaTypeVar u) (MetaTypeVar v) =
         (uPos@(MetaVar uRef), ur) <- M.repr u
         (vPos@(MetaVar vRef), vr) <- M.repr v
         -- TODO: Choose which to link into which weight/level-wise
-        let link a b =
-                -- TODO: Update the "names"? They should die!
-                M.writePos a $ Bound $ MetaTypeVar b
+        let link a b = M.writePos a $ Bound $ MetaTypeVar b
         unless (uRef == vRef) $
             case (ur, vr) of
             (Unbound uCs, Unbound vCs) ->
