@@ -8,6 +8,7 @@ module Data.RefZone
 import           Control.DeepSeq (NFData(..))
 import           Control.Lens.Operators
 import           Control.Monad.ST (ST, runST)
+import           Data.RefZone.Internal
 import           Data.STRef
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
@@ -30,8 +31,6 @@ data Zone s = Zone
 instance NFData (Zone s) where rnf (Zone s v) = s `seq` v `seq` ()
 
 newtype Frozen = Frozen (V.Vector Box)
-
-newtype Ref a = Ref Int deriving (Eq, NFData)
 
 {-# INLINE initialSize #-}
 initialSize :: Int
