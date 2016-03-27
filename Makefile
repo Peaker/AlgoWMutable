@@ -29,12 +29,12 @@ test/TestRefZone.O2: test/TestRefZone.hs
 	${GHC} ${O2_FLAGS}
 
 run: test/benchmark.O2
-	-echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
+#	-echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 	./$<
-	-echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
+#	-echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 
 runboosted: benchmark
-	echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
+#	echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 	./$<
 
 .PHONY: test/{benchmark,benchmark.O1,benchmark.O2,benchmark.p,benchmark.p.prof} run
