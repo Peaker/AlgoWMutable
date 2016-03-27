@@ -44,21 +44,12 @@ instance NFData SchemeBinders where
     rnf (SchemeBinders x y z) = rnf x `seq` rnf y `seq` rnf z
 instance Monoid SchemeBinders where
     mempty = SchemeBinders IntMap.empty IntMap.empty IntMap.empty
-    mappend (SchemeBinders t0 r0 s0) (SchemeBinders t1 r1 s1)
-        | enableAssertions =
-            SchemeBinders
-            -- TODO: Can use assert-same-constraints and compile out for
-            -- perf instead of mappend
-            (IntMap.unionWith assertSameConstraints t0 t1)
-            (IntMap.unionWith assertSameConstraints r0 r1)
-            (IntMap.unionWith assertSameConstraints s0 s1)
-        | otherwise =
-            SchemeBinders
-            (IntMap.union t0 t1)
-            (IntMap.union r0 r1)
-            (IntMap.union s0 s1)
+    mappend (SchemeBinders t0 r0 s0) (SchemeBinders t1 r1 s1) =
+        SchemeBinders
+        (IntMap.unionWith assertSameConstraints t0 t1)
+        (IntMap.unionWith assertSameConstraints r0 r1)
+        (IntMap.unionWith assertSameConstraints s0 s1)
         where
-            enableAssertions = False
             assertSameConstraints x y
                 | x == y = x
                 | otherwise =
