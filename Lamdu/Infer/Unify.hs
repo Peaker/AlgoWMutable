@@ -35,6 +35,9 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat hiding (tail)
 
+----------------------
+-- Unify composites --
+
 data CompositeTail c
     = CompositeTailClosed
     | CompositeTailOpen (MetaVar ('CompositeT c)) (Constraints ('CompositeT c))
@@ -149,14 +152,6 @@ unifyCompositesOpenOpen (uRef, uCs, uFields) (vRef, vCs, vFields) =
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
-unifyComposite ::
-    IsCompositeTag c => MetaComposite c -> MetaComposite c ->
-    M.Infer s ()
-unifyComposite = {-# SCC "unifyComposite" #-}unify unifyCompositeAST
-
-unifyType :: MetaType -> MetaType -> M.Infer s ()
-unifyType = {-# SCC "unifyType" #-}unify unifyTypeAST
-
 -- We already know we are record vals, and will re-read them
 -- via flatten, so no need for unify's read of these:
 unifyCompositeAST ::
@@ -188,50 +183,8 @@ unifyCompositeAST u v =
         Map.intersectionWith unifyType uFields vFields
             & sequenceA_
 
-unify ::
-    (Monoid (Constraints tag)) =>
-    (AST tag MetaTypeAST ->
-     AST tag MetaTypeAST -> M.Infer s ()) ->
-    MetaTypeAST tag -> MetaTypeAST tag -> M.Infer s ()
-unify f (MetaTypeAST u) (MetaTypeAST v) = f u v
-unify f (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST f u v
-unify f (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST f v u
-unify f (MetaTypeVar u) (MetaTypeVar v) =
-    do
-        (uRef, ur) <- M.repr u
-        (vRef, vr) <- M.repr v
-        -- TODO: Choose which to link into which weight/level-wise
-        let link a b = M.writeRef a $ Link b
-        unless (uRef == vRef) $
-            case (ur, vr) of
-            (Unbound uCs, Unbound vCs) ->
-                do
-                    link uRef vRef
-                    M.writeRef vRef $ LinkFinal $ Unbound $ uCs `mappend` vCs
-            (Unbound uCs, Bound vAst) -> unifyUnbound uRef uCs vAst
-            (Bound uAst, Unbound vCs) -> unifyUnbound vRef vCs uAst
-            (Bound uAst, Bound vAst) ->
-                do
-                    link uRef vRef
-                    f uAst vAst
-
-unifyUnbound ::
-    MetaVar tag -> Constraints tag -> AST tag MetaTypeAST ->
-    M.Infer s ()
-unifyUnbound ref cs ast =
-    do
-        {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
-        M.writeRef ref $ LinkFinal $ Bound ast
-
-unifyVarAST ::
-    (Monoid (Constraints tag)) =>
-    (AST tag MetaTypeAST ->
-     AST tag MetaTypeAST -> M.Infer s ()) ->
-    AST tag MetaTypeAST -> MetaVar tag -> M.Infer s ()
-unifyVarAST f uAst v =
-    M.repr v >>= \case
-    (_, Bound vAst) -> f uAst vAst
-    (vRef, Unbound vCs) -> unifyUnbound vRef vCs uAst
+--------------------
+-- Unify type     --
 
 unifyTInstParams ::
     M.Err -> Map TParamId MetaType -> Map TParamId MetaType -> M.Infer s ()
@@ -273,3 +226,61 @@ unifyTypeAST (TFun uArg uRes) vTyp =
         (vArg, vRes) <- unifyMatch "TFun" vTyp Type._TFun
         unifyType uArg vArg
         unifyType uRes vRes
+
+--------------------
+-- Generic unify: --
+--                --
+
+unifyUnbound ::
+    MetaVar tag -> Constraints tag -> AST tag MetaTypeAST ->
+    M.Infer s ()
+unifyUnbound ref cs ast =
+    do
+        {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
+        M.writeRef ref $ LinkFinal $ Bound ast
+
+unifyVarAST ::
+    (Monoid (Constraints tag)) =>
+    (AST tag MetaTypeAST ->
+     AST tag MetaTypeAST -> M.Infer s ()) ->
+    AST tag MetaTypeAST -> MetaVar tag -> M.Infer s ()
+unifyVarAST f uAst v =
+    M.repr v >>= \case
+    (_, Bound vAst) -> f uAst vAst
+    (vRef, Unbound vCs) -> unifyUnbound vRef vCs uAst
+
+unify ::
+    (Monoid (Constraints tag)) =>
+    (AST tag MetaTypeAST ->
+     AST tag MetaTypeAST -> M.Infer s ()) ->
+    MetaTypeAST tag -> MetaTypeAST tag -> M.Infer s ()
+unify f (MetaTypeAST u) (MetaTypeAST v) = f u v
+unify f (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST f u v
+unify f (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST f v u
+unify f (MetaTypeVar u) (MetaTypeVar v) =
+    do
+        (uRef, ur) <- M.repr u
+        (vRef, vr) <- M.repr v
+        -- TODO: Choose which to link into which weight/level-wise
+        let link a b = M.writeRef a $ Link b
+        unless (uRef == vRef) $
+            case (ur, vr) of
+            (Unbound uCs, Unbound vCs) ->
+                do
+                    link uRef vRef
+                    M.writeRef vRef $ LinkFinal $ Unbound $ uCs `mappend` vCs
+            (Unbound uCs, Bound vAst) -> unifyUnbound uRef uCs vAst
+            (Bound uAst, Unbound vCs) -> unifyUnbound vRef vCs uAst
+            (Bound uAst, Bound vAst) ->
+                do
+                    link uRef vRef
+                    f uAst vAst
+--------------------
+
+unifyComposite ::
+    IsCompositeTag c => MetaComposite c -> MetaComposite c ->
+    M.Infer s ()
+unifyComposite = {-# SCC "unifyComposite" #-}unify unifyCompositeAST
+
+unifyType :: MetaType -> MetaType -> M.Infer s ()
+unifyType = {-# SCC "unifyType" #-}unify unifyTypeAST
