@@ -84,6 +84,7 @@ inferApp (Val.App fun arg) =
     do
         (fun', funTyp) <- infer fun
         (arg', argTyp) <- infer arg
+        -- TODO: Maybe a simple unify, if inlined, will be as fast?
         resTyp <-
             case funTyp of
             MetaTypeVar ref ->
