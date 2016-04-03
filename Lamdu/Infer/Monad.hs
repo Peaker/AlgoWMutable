@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -25,12 +26,10 @@ import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Control.Monad (when)
-import qualified Control.Monad.RSS as RSS
 import           Control.Monad.ST (ST, runST)
-import           Control.Monad.Trans.Class (lift)
-import           Control.Monad.Trans.RSS (RSST, runRSST)
 import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
+import           Data.Monoid ((<>))
 import           Data.RefZone (Zone)
 import qualified Data.RefZone as RefZone
 import           Data.RefZone.RefMap (RefMap)
@@ -82,10 +81,11 @@ data Env s = Env
     , envScope :: Scope MetaType
     }
 
-newtype Infer s a = Infer
-    { unInfer :: Env s -> ST s (Either Err a)
+newtype InferEnv env s a = Infer
+    { unInfer :: env -> ST s (Either Err a)
     } deriving (Functor)
-instance Applicative (Infer s) where
+type Infer s = InferEnv (Env s) s
+instance Applicative (InferEnv env s) where
     {-# INLINE pure #-}
     pure x = Infer $ \_ -> pure (Right x)
     {-# INLINE (<*>) #-}
@@ -96,7 +96,7 @@ instance Applicative (Infer s) where
             Left err -> pure (Left err)
             Right xres ->
                 pure (Right (fres xres))
-instance Monad (Infer s) where
+instance Monad (InferEnv env s) where
     {-# INLINE return #-}
     return = pure
     {-# INLINE (>>=) #-}
@@ -113,18 +113,18 @@ runInfer scope act =
         unInfer act Env { envFresh = fresh, envZone = zone, envScope = scope }
 
 {-# INLINE askEnv #-}
-askEnv :: Infer s (Env s)
+askEnv :: InferEnv env s env
 askEnv = Infer (return . Right)
 
 {-# INLINE liftST #-}
-liftST :: ST s a -> Infer s a
+liftST :: ST s a -> InferEnv env s a
 liftST act = Infer $ \_ -> act <&> Right
 
-throwError :: Err -> Infer s a
+throwError :: Err -> InferEnv env s a
 throwError err = Infer $ \_ -> return $ Left err
 
 {-# INLINE localEnv #-}
-localEnv :: (Env s -> Env s) -> Infer s a -> Infer s a
+localEnv :: (b -> a) -> InferEnv a s x -> InferEnv b s x
 localEnv f (Infer act) = Infer (act . f)
 
 {-# INLINE newRef #-}
@@ -227,7 +227,18 @@ schemeBindersSingleton (TVarName tvName) cs =
         binders = IntMap.singleton tvName cs
 
 type DerefCache = (RefMap (T 'TypeT), RefMap (T RecordT), RefMap (T SumT))
-type Deref s = RSST RefSet SchemeBinders DerefCache (Infer s)
+data DerefEnv s = DerefEnv
+    { _derefEnvVisited :: RefSet
+    , derefEnvCache :: STRef s DerefCache
+    , derefEnvBinders :: STRef s SchemeBinders
+    , derefEnvInfer :: Env s
+    }
+type Deref s = InferEnv (DerefEnv s) s
+
+Lens.makeLenses ''DerefEnv
+
+derefInfer :: Infer s a -> Deref s a
+derefInfer = localEnv derefEnvInfer
 
 derefCache :: forall tag. IsTag tag => RefZone.Ref (Link tag) -> Lens' DerefCache (Maybe (T tag))
 derefCache tag =
@@ -236,25 +247,37 @@ derefCache tag =
       IsCompositeT IsRecordC -> _2
       IsCompositeT IsSumC    -> _3
     ) . RefMap.at tag
+
+derefMemoize ::
+    IsTag tag => RefZone.Ref (Link tag) -> Deref s (T tag) -> Deref s (T tag)
+derefMemoize ref act =
+    do
+        cacheRef <- askEnv <&> derefEnvCache
+        liftST (readSTRef cacheRef) <&> (^. derefCache ref)
+            >>= \case
+            Just t -> pure t
+            Nothing ->
+                do
+                    res <- act
+                    derefCache ref ?~ res & modifySTRef cacheRef & liftST
+                    return res
+
 derefVar :: IsTag tag => MetaVar tag -> Deref s (T tag)
 derefVar var =
     do
-        (ref, final) <- lift (repr var)
-        visited <- RSS.ask
-        when (ref `RefSet.isMember` visited) $
-            lift (throwError InfiniteType)
-        cached <- Lens.use (derefCache ref)
-        case cached of
-            Just t -> pure t
-            Nothing ->
-                case final of
-                Bound ast -> derefAST ast & RSS.local (RefSet.insert ref)
-                Unbound cs ->
-                    do
-                        tvName <- nextFresh <&> TVarName & lift
-                        schemeBindersSingleton tvName cs & RSS.tell
-                        return $ TVar tvName
-                >>= (derefCache ref <?=)
+        (ref, final) <- repr var & derefInfer
+        visited <- askEnv <&> _derefEnvVisited
+        when (ref `RefSet.isMember` visited) $ throwError InfiniteType
+        derefMemoize ref $
+            case final of
+            Bound ast -> derefAST ast & localEnv (derefEnvVisited %~ RefSet.insert ref)
+            Unbound cs ->
+                do
+                    tvName <- nextFresh <&> TVarName & derefInfer
+                    askEnv
+                        <&> derefEnvBinders
+                        >>= liftST . flip modifySTRef (schemeBindersSingleton tvName cs <>)
+                    return $ TVar tvName
 
 deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
 deref = \case
@@ -267,5 +290,9 @@ derefAST = fmap T . Type.ntraverse deref deref deref
 generalize :: MetaType -> Infer s (Scheme 'TypeT)
 generalize t =
     {-# SCC "generalize" #-}
-    runRSST (deref t) mempty mempty
-    <&> (\(x, _, w) -> Scheme w x)
+    do
+        cacheRef <- liftST $ newSTRef mempty
+        bindersRef <- liftST $ newSTRef mempty
+        typ <- deref t & localEnv (DerefEnv mempty cacheRef bindersRef)
+        binders <- liftST $ readSTRef bindersRef
+        Scheme binders typ & return
