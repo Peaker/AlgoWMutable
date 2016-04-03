@@ -125,16 +125,22 @@ unifyCompositesOpenClosed ::
     IsCompositeTag c =>
     (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
     CompositeFields -> M.Infer s ()
-unifyCompositesOpenClosed (openTailRef, openConstraints, openFields) closedFields
-    | Map.null uniqueOpenFields =
-          writeCompositeTail (openTailRef, openConstraints) $
-          FlatComposite uniqueClosedFields CompositeTailClosed
-    | otherwise =
+unifyCompositesOpenClosed (openTailRef, CompositeConstraints openDisallowed, openFields) closedFields
+    | not (Map.null uniqueOpenFields) =
           M.throwError $
           M.DoesNotUnify
           ("Record with at least fields:" <+> prettyFieldNames openFields)
           ("Record fields:" <+> prettyFieldNames closedFields)
+    | not (Set.null disallowedFields) =
+          M.throwError $ M.DuplicateFields $ Set.toList disallowedFields
+    | otherwise =
+          Map.foldrWithKey extend empty closedFields
+          & LinkFinal . Bound
+          & M.writeRef openTailRef
     where
+        extend name typ = TCompositeExtend name typ . MetaTypeAST
+        empty = TEmptyComposite
+        disallowedFields = openDisallowed `Set.intersection` Map.keysSet uniqueClosedFields
         uniqueOpenFields = openFields `Map.difference` closedFields
         uniqueClosedFields = closedFields `Map.difference` openFields
 
