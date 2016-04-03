@@ -173,13 +173,17 @@ unifyCompositeAST u v =
         FlatComposite vFields vTail <- {-# SCC "unifyCompositeAST.flatten(v)" #-}flattenVal v
         case (uTail, vTail) of
             (CompositeTailClosed, CompositeTailClosed) ->
-                {-# SCC "unifyCompositesClosedClosed" #-}unifyCompositesClosedClosed uFields vFields
+                {-# SCC "unifyCompositesClosedClosed" #-}
+                unifyCompositesClosedClosed uFields vFields
             (CompositeTailOpen uRef uCs, CompositeTailClosed) ->
-                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (uRef, uCs, uFields) vFields
+                {-# SCC "unifyCompositesOpenClosed" #-}
+                unifyCompositesOpenClosed (uRef, uCs, uFields) vFields
             (CompositeTailClosed, CompositeTailOpen vRef vCs) ->
-                {-# SCC "unifyCompositesOpenClosed" #-}unifyCompositesOpenClosed (vRef, vCs, vFields) uFields
+                {-# SCC "unifyCompositesOpenClosed" #-}
+                unifyCompositesOpenClosed (vRef, vCs, vFields) uFields
             (CompositeTailOpen uRef uCs, CompositeTailOpen vRef vCs) ->
-                {-# SCC "unifyCompositesOpenOpen" #-}unifyCompositesOpenOpen (uRef, uCs, uFields) (vRef, vCs, vFields)
+                {-# SCC "unifyCompositesOpenOpen" #-}
+                unifyCompositesOpenOpen (uRef, uCs, uFields) (vRef, vCs, vFields)
         -- We intersect-unify AFTER unifying the composite shapes, so
         -- we know the flat composites are accurate
         Map.intersectionWith unifyType uFields vFields
