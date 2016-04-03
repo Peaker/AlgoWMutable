@@ -63,7 +63,8 @@ flatten :: MetaComposite c -> M.Infer s (FlatComposite c)
 flatten (MetaTypeAST ast) = flattenVal ast
 flatten (MetaTypeVar ref) =
     M.repr ref >>= \case
-    (_, Unbound cs) -> return $ FlatComposite Map.empty $ CompositeTailOpen ref cs
+    (finalRef, Unbound cs) ->
+        return $ FlatComposite Map.empty $ CompositeTailOpen finalRef cs
     (_, Bound ast) -> flattenVal ast
 
 unflatten :: IsCompositeTag c => FlatComposite c -> MetaComposite c
