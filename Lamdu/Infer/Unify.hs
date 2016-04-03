@@ -80,10 +80,13 @@ unflatten (FlatComposite fields tail) =
 prettyFieldNames :: Map Tag a -> Doc
 prettyFieldNames = intercalate " " . map pPrint . Map.keys
 
+ascKeys :: Map a b -> [a]
+ascKeys = map fst . Map.toAscList
+
 {-# INLINE unifyCompositesClosedClosed #-}
 unifyCompositesClosedClosed :: CompositeFields -> CompositeFields -> M.Infer s ()
 unifyCompositesClosedClosed uFields vFields
-    | Map.keysSet uFields == Map.keysSet vFields = return ()
+    | ascKeys uFields == ascKeys vFields = return ()
     | otherwise =
           M.throwError $
           M.DoesNotUnify
