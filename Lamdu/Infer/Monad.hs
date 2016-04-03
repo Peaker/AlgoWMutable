@@ -254,7 +254,7 @@ derefVar var =
                         tvName <- nextFresh <&> TVarName & lift
                         schemeBindersSingleton tvName cs & RSS.tell
                         return $ TVar tvName
-            >>= (derefCache ref <?=)
+                >>= (derefCache ref <?=)
 
 deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
 deref = \case
