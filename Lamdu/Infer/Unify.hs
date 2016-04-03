@@ -11,7 +11,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
 module Lamdu.Infer.Unify
-    where
+    ( unifyVarAST, unifyTypeAST, unifyType
+    ) where
 
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
