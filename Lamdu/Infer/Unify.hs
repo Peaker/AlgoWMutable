@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 -- | Type unification and meta-variables support
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -11,7 +12,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
 module Lamdu.Infer.Unify
-    ( unifyVarAST, unifyTypeAST, unifyType
+    ( unifyTypeVar, unifyType, unifyComposite
     ) where
 
 import qualified Control.Lens as Lens
@@ -106,8 +107,7 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
         duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
         FlatComposite innerFields innerTail = flatComposite
 
-constraintsCheck ::
-    Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
+constraintsCheck :: Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
 constraintsCheck TypeConstraints _ = return ()
 constraintsCheck cs@CompositeConstraints{} inner =
     ({-# SCC "constraintsCheck.flatten" #-}flattenVal inner) >>= flatConstraintsCheck cs
@@ -246,63 +246,107 @@ unifyTypeAST (TFun uArg uRes) vTyp =
 -- Generic unify: --
 --                --
 
-unifyVarAST ::
-    (Monoid (Constraints tag)) =>
-    (AST tag MetaTypeAST ->
-     AST tag MetaTypeAST -> M.Infer s ()) ->
-    AST tag MetaTypeAST -> MetaVar tag -> M.Infer s ()
-unifyVarAST f uAst v =
-    M.repr v >>= \case
-    (_, Bound vAst) -> f uAst vAst
+data UnifyActions tag s = UnifyActions
+    { actionUnifyASTs :: AST tag MetaTypeAST -> AST tag MetaTypeAST -> M.Infer s ()
+    , actionUnifyUnboundToAST :: Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
+    , actionUnifyUnbounds :: Constraints tag -> Constraints tag -> M.Infer s (Constraints tag)
+    }
+
+data UnifyEnv tag s = UnifyEnv
+    { envActions :: {-# UNPACK #-}!(UnifyActions tag s)
+    , envInfer :: M.Env s
+    }
+
+type Unify tag s = M.InferEnv (UnifyEnv tag s) s
+
+unifyASTs :: AST tag MetaTypeAST -> AST tag MetaTypeAST -> Unify tag s ()
+unifyASTs u v =
+    do
+        UnifyActions{actionUnifyASTs} <- M.askEnv <&> envActions
+        actionUnifyASTs u v & infer
+
+unifyUnboundToAST :: Constraints tag -> AST tag MetaTypeAST -> Unify tag s ()
+unifyUnboundToAST u v =
+    do
+        UnifyActions{actionUnifyUnboundToAST} <- M.askEnv <&> envActions
+        actionUnifyUnboundToAST u v & infer
+
+unifyUnbounds :: Constraints tag -> Constraints tag -> Unify tag s (Constraints tag)
+unifyUnbounds u v =
+    do
+        UnifyActions{actionUnifyUnbounds} <- M.askEnv <&> envActions
+        actionUnifyUnbounds u v & infer
+
+infer :: M.Infer s a -> Unify tag s a
+infer = M.localEnv envInfer
+
+runUnify ::
+    Monoid (Constraints tag) =>
+    (AST tag MetaTypeAST -> AST tag MetaTypeAST -> M.Infer s ()) ->
+    Unify tag s a -> M.Infer s a
+runUnify f act =
+    M.localEnv
+    (UnifyEnv UnifyActions
+     { actionUnifyASTs = f
+     , actionUnifyUnboundToAST = {-# SCC "constraintsCheck" #-}constraintsCheck
+     , actionUnifyUnbounds = \uCs vCs -> return (uCs `mappend` vCs)
+     })
+    act
+
+unifyVarAST :: AST tag MetaTypeAST -> MetaVar tag -> Unify tag s ()
+unifyVarAST uAst v =
+    infer (M.repr v) >>= \case
+    (_, Bound vAst) -> unifyASTs uAst vAst
     (vRef, Unbound vCs) ->
         do
-            {-# SCC "constraintsCheck" #-}constraintsCheck vCs uAst
-            M.writeRef vRef $ LinkFinal $ Bound uAst
+            unifyUnboundToAST vCs uAst
+            infer $ M.writeRef vRef $ LinkFinal $ Bound uAst
 
+{-# INLINE unifyUnboundToBound #-}
 unifyUnboundToBound ::
     MetaVar tag -> Constraints tag -> (MetaVar tag, AST tag MetaTypeAST) ->
-    M.Infer s ()
+    Unify tag s ()
 unifyUnboundToBound uRef uCs (vRef, vAst) =
     do
-        {-# SCC "constraintsCheck" #-}constraintsCheck uCs vAst
+        unifyUnboundToAST uCs vAst
         -- link to the final ref, and not to the direct AST info so we
         -- know to avoid reunify work in future unify calls
-        M.writeRef uRef $ Link vRef
+        infer $ M.writeRef uRef $ Link vRef
 
-unify ::
-    (Monoid (Constraints tag)) =>
-    (AST tag MetaTypeAST ->
-     AST tag MetaTypeAST -> M.Infer s ()) ->
-    MetaTypeAST tag -> MetaTypeAST tag -> M.Infer s ()
-unify f (MetaTypeAST u) (MetaTypeAST v) = f u v
-unify f (MetaTypeAST u) (MetaTypeVar v) =
-    unifyVarAST f u v
-unify f (MetaTypeVar u) (MetaTypeAST v) =
-    unifyVarAST f v u
-unify f (MetaTypeVar u) (MetaTypeVar v) =
+unify :: MetaTypeAST tag -> MetaTypeAST tag -> Unify tag s ()
+unify (MetaTypeAST u) (MetaTypeAST v) = unifyASTs u v
+unify (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST u v
+unify (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST v u
+unify (MetaTypeVar u) (MetaTypeVar v) =
     do
-        (uRef, ur) <- M.repr u
-        (vRef, vr) <- M.repr v
+        (uRef, ur) <- M.repr u & infer
+        (vRef, vr) <- M.repr v & infer
         -- TODO: Choose which to link into which weight/level-wise
         let link a b = M.writeRef a $ Link b
         unless (uRef == vRef) $
             case (ur, vr) of
             (Unbound uCs, Unbound vCs) ->
                 do
-                    link uRef vRef
-                    M.writeRef vRef $ LinkFinal $ Unbound $ uCs `mappend` vCs
+                    link uRef vRef & infer
+                    cs <- unifyUnbounds uCs vCs
+                    infer $ M.writeRef vRef $ LinkFinal $ Unbound cs
             (Unbound uCs, Bound vAst) -> unifyUnboundToBound uRef uCs (vRef, vAst)
             (Bound uAst, Unbound vCs) -> unifyUnboundToBound vRef vCs (uRef, uAst)
             (Bound uAst, Bound vAst) ->
                 do
-                    link uRef vRef
-                    f uAst vAst
+                    link uRef vRef & infer
+                    unifyASTs uAst vAst
+
 --------------------
+
+unifyTypeVar :: AST 'TypeT MetaTypeAST -> MetaVar 'TypeT -> M.Infer s ()
+unifyTypeVar ast var = unifyVarAST ast var & runUnify unifyTypeAST
 
 unifyComposite ::
     IsCompositeTag c => MetaComposite c -> MetaComposite c ->
     M.Infer s ()
-unifyComposite = {-# SCC "unifyComposite" #-}unify unifyCompositeAST
+unifyComposite u v =
+    {-# SCC "unifyComposite" #-}unify u v & runUnify unifyCompositeAST
 
 unifyType :: MetaType -> MetaType -> M.Infer s ()
-unifyType = {-# SCC "unifyType" #-}unify unifyTypeAST
+unifyType u v = {-# SCC "unifyType" #-}unify u v & runUnify unifyTypeAST

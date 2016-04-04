@@ -9,7 +9,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
 module Lamdu.Infer.Monad
-    ( Infer
+    ( InferEnv
+    , Env, localEnv, askEnv
+    , Infer
     , Err(..), throwError
     , runInfer
     , repr
