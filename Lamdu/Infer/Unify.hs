@@ -94,8 +94,8 @@ unifyCompositesClosedClosed uFields vFields
           ("Record fields:" <+> prettyFieldNames uFields)
           ("Record fields:" <+> prettyFieldNames vFields)
 
-flatConstraintsCheck :: Constraints ('CompositeT c) -> FlatComposite c -> M.Infer s ()
-flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) flatComposite =
+flatConstraintsPropagate :: Constraints ('CompositeT c) -> FlatComposite c -> M.Infer s ()
+flatConstraintsPropagate outerConstraints@(CompositeConstraints outerDisallowed) flatComposite =
     do
         unless (Set.null duplicates) $ M.throwError $ M.DuplicateFields $
             Set.toList duplicates
@@ -107,10 +107,10 @@ flatConstraintsCheck outerConstraints@(CompositeConstraints outerDisallowed) fla
         duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
         FlatComposite innerFields innerTail = flatComposite
 
-constraintsCheck :: Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
-constraintsCheck TypeConstraints _ = return ()
-constraintsCheck cs@CompositeConstraints{} inner =
-    ({-# SCC "constraintsCheck.flatten" #-}flattenVal inner) >>= flatConstraintsCheck cs
+constraintsPropagate :: Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
+constraintsPropagate TypeConstraints _ = return ()
+constraintsPropagate cs@CompositeConstraints{} inner =
+    ({-# SCC "constraintsPropagate.flatten" #-}flattenVal inner) >>= flatConstraintsPropagate cs
 
 writeCompositeTail ::
     IsCompositeTag c =>
@@ -118,7 +118,7 @@ writeCompositeTail ::
     FlatComposite c -> M.Infer s ()
 writeCompositeTail (ref, cs) composite =
     do
-        {-# SCC "flatConstraintsCheck" #-}flatConstraintsCheck cs composite
+        {-# SCC "flatConstraintsPropagate" #-}flatConstraintsPropagate cs composite
         M.writeRef ref $ case unflatten composite of
             MetaTypeAST ast -> LinkFinal $ Bound ast
             MetaTypeVar var -> Link var
@@ -288,7 +288,7 @@ runUnify f act =
     M.localEnv
     (UnifyEnv UnifyActions
      { actionUnifyASTs = f
-     , actionUnifyUnboundToAST = {-# SCC "constraintsCheck" #-}constraintsCheck
+     , actionUnifyUnboundToAST = {-# SCC "constraintsPropagate" #-}constraintsPropagate
      , actionUnifyUnbounds = \uCs vCs -> return (uCs `mappend` vCs)
      })
     act
