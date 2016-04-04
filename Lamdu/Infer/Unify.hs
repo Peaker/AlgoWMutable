@@ -1,6 +1,8 @@
-{-# LANGUAGE NamedFieldPuns #-}
 -- | Type unification and meta-variables support
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -18,10 +20,10 @@ module Lamdu.Infer.Unify
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Monad (unless, zipWithM_)
-import           Data.Foldable (sequenceA_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
+import           Data.RefZone (Ref)
 import qualified Data.Set as Set
 import           Lamdu.Expr.Identifier (Tag(..))
 import           Lamdu.Expr.Type (Type, Composite, AST(..), TParamId)
@@ -31,7 +33,6 @@ import           Lamdu.Expr.Type.Meta
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import qualified Lamdu.Infer.Monad as M
 import           Pretty.Map ()
-import           Pretty.Utils (intercalate)
 import           Text.PrettyPrint (Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
@@ -40,164 +41,14 @@ import           Prelude.Compat hiding (tail)
 ----------------------
 -- Unify composites --
 
-data CompositeTail c
-    = CompositeTailClosed
-    | CompositeTailOpen (MetaVar ('CompositeT c)) (Constraints ('CompositeT c))
-    -- TODO(Review): The "Constraints" cache above is necessary? Can it become stale?
-
 type CompositeFields = Map Tag MetaType
 
-data FlatComposite c = FlatComposite
-    { _fcFields :: CompositeFields
-    , __fcTailUF :: CompositeTail c
-    }
+-- TODO: Choose which to link into which weight/level-wise
+writeLink :: Ref (Link tag) -> MetaVar tag -> M.Infer s ()
+writeLink ref x = M.writeRef ref $ Link x
 
-Lens.makeLenses ''FlatComposite
-
-flattenVal :: Composite c MetaTypeAST -> M.Infer s (FlatComposite c)
-flattenVal TEmptyComposite =
-    return $ FlatComposite Map.empty CompositeTailClosed
-flattenVal (TCompositeExtend n t r) =
-    flatten r <&> fcFields . Lens.at n ?~ t
-
-flatten :: MetaComposite c -> M.Infer s (FlatComposite c)
-flatten (MetaTypeAST ast) = flattenVal ast
-flatten (MetaTypeVar ref) =
-    M.repr ref >>= \case
-    (finalRef, Unbound cs) ->
-        return $ FlatComposite Map.empty $ CompositeTailOpen finalRef cs
-    (_, Bound ast) -> flattenVal ast
-
-unflatten :: IsCompositeTag c => FlatComposite c -> MetaComposite c
-unflatten (FlatComposite fields tail) =
-    {-# SCC "unflatten" #-}Map.toList fields & go
-    where
-        go [] = case tail of
-            CompositeTailClosed -> MetaTypeAST TEmptyComposite
-            CompositeTailOpen ref _ -> MetaTypeVar ref
-        go ((name, typ):fs) =
-            go fs & TCompositeExtend name typ & MetaTypeAST
-
-prettyFieldNames :: Map Tag a -> Doc
-prettyFieldNames = intercalate " " . map pPrint . Map.keys
-
-ascKeys :: Map a b -> [a]
-ascKeys = map fst . Map.toAscList
-
-{-# INLINE unifyCompositesClosedClosed #-}
-unifyCompositesClosedClosed :: CompositeFields -> CompositeFields -> M.Infer s ()
-unifyCompositesClosedClosed uFields vFields
-    | ascKeys uFields == ascKeys vFields = return ()
-    | otherwise =
-          M.throwError $
-          M.DoesNotUnify
-          ("Record fields:" <+> prettyFieldNames uFields)
-          ("Record fields:" <+> prettyFieldNames vFields)
-
-flatConstraintsPropagate :: Constraints ('CompositeT c) -> FlatComposite c -> M.Infer s ()
-flatConstraintsPropagate outerConstraints@(CompositeConstraints outerDisallowed) flatComposite =
-    do
-        unless (Set.null duplicates) $ M.throwError $ M.DuplicateFields $
-            Set.toList duplicates
-        case innerTail of
-            CompositeTailClosed -> return ()
-            CompositeTailOpen ref innerConstraints ->
-                M.writeRef ref $ LinkFinal $ Unbound $ outerConstraints `mappend` innerConstraints
-    where
-        duplicates = Set.intersection (Map.keysSet innerFields) outerDisallowed
-        FlatComposite innerFields innerTail = flatComposite
-
-constraintsPropagate :: Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
-constraintsPropagate TypeConstraints _ = return ()
-constraintsPropagate cs@CompositeConstraints{} inner =
-    ({-# SCC "constraintsPropagate.flatten" #-}flattenVal inner) >>= flatConstraintsPropagate cs
-
-writeCompositeTail ::
-    IsCompositeTag c =>
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
-    FlatComposite c -> M.Infer s ()
-writeCompositeTail (ref, cs) composite =
-    do
-        {-# SCC "flatConstraintsPropagate" #-}flatConstraintsPropagate cs composite
-        M.writeRef ref $ case unflatten composite of
-            MetaTypeAST ast -> LinkFinal $ Bound ast
-            MetaTypeVar var -> Link var
-
-{-# INLINE unifyCompositesOpenClosed #-}
-unifyCompositesOpenClosed ::
-    IsCompositeTag c =>
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
-    CompositeFields -> M.Infer s ()
-unifyCompositesOpenClosed (openTailRef, CompositeConstraints openDisallowed, openFields) closedFields
-    | not (Map.null uniqueOpenFields) =
-          M.throwError $
-          M.DoesNotUnify
-          ("Record with at least fields:" <+> prettyFieldNames openFields)
-          ("Record fields:" <+> prettyFieldNames closedFields)
-    | not (Set.null disallowedFields) =
-          M.throwError $ M.DuplicateFields $ Set.toList disallowedFields
-    | otherwise =
-          Map.foldrWithKey extend empty closedFields
-          & LinkFinal . Bound
-          & M.writeRef openTailRef
-    where
-        extend name typ = TCompositeExtend name typ . MetaTypeAST
-        empty = TEmptyComposite
-        disallowedFields = openDisallowed `Set.intersection` Map.keysSet uniqueClosedFields
-        uniqueOpenFields = openFields `Map.difference` closedFields
-        uniqueClosedFields = closedFields `Map.difference` openFields
-
-{-# INLINE unifyCompositesOpenOpen #-}
-unifyCompositesOpenOpen ::
-    IsCompositeTag c =>
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
-    M.Infer s ()
-unifyCompositesOpenOpen (uRef, uCs, uFields) (vRef, vCs, vFields) =
-    do
-        commonRest <- M.freshRef cs <&> (`CompositeTailOpen` cs)
-        writeCompositeTail (uRef, uCs) $ FlatComposite uniqueVFields commonRest
-        writeCompositeTail (vRef, vCs) $ FlatComposite uniqueUFields commonRest
-    where
-        cs = uCs `mappend` vCs
-        uniqueUFields = uFields `Map.difference` vFields
-        uniqueVFields = vFields `Map.difference` uFields
-
--- We already know we are record vals, and will re-read them
--- via flatten, so no need for unify's read of these:
-unifyCompositeAST ::
-    IsCompositeTag c =>
-    Composite c MetaTypeAST ->
-    Composite c MetaTypeAST ->
-    M.Infer s ()
-unifyCompositeAST TEmptyComposite TEmptyComposite = return ()
-unifyCompositeAST (TCompositeExtend un ut ur) (TCompositeExtend vn vt vr)
-    | un == vn =
-        do
-            unifyType ut vt
-            unifyComposite ur vr
-unifyCompositeAST u v =
-    do
-        FlatComposite uFields uTail <- {-# SCC "unifyCompositeAST.flatten(u)" #-}flattenVal u
-        FlatComposite vFields vTail <- {-# SCC "unifyCompositeAST.flatten(v)" #-}flattenVal v
-        case (uTail, vTail) of
-            (CompositeTailClosed, CompositeTailClosed) ->
-                {-# SCC "unifyCompositesClosedClosed" #-}
-                unifyCompositesClosedClosed uFields vFields
-            (CompositeTailOpen uRef uCs, CompositeTailClosed) ->
-                {-# SCC "unifyCompositesOpenClosed" #-}
-                unifyCompositesOpenClosed (uRef, uCs, uFields) vFields
-            (CompositeTailClosed, CompositeTailOpen vRef vCs) ->
-                {-# SCC "unifyCompositesOpenClosed" #-}
-                unifyCompositesOpenClosed (vRef, vCs, vFields) uFields
-            (CompositeTailOpen uRef uCs, CompositeTailOpen vRef vCs) ->
-                {-# SCC "unifyCompositesOpenOpen" #-}
-                unifyCompositesOpenOpen (uRef, uCs, uFields) (vRef, vCs, vFields)
-        -- We intersect-unify AFTER unifying the composite shapes, so
-        -- we know the flat composites are accurate
-        Map.intersectionWith unifyType uFields vFields
-            & sequenceA_
-
+writeFinal :: Ref (Link tag) -> Final tag -> M.Infer s ()
+writeFinal ref = M.writeRef ref . LinkFinal
 --------------------
 -- Unify type     --
 
@@ -246,10 +97,20 @@ unifyTypeAST (TFun uArg uRes) vTyp =
 -- Generic unify: --
 --                --
 
+-- | 'id' or 'flip'
+type Order = forall a b. ((a -> a -> b) -> a -> a -> b)
+
 data UnifyActions tag s = UnifyActions
     { actionUnifyASTs :: AST tag MetaTypeAST -> AST tag MetaTypeAST -> M.Infer s ()
-    , actionUnifyUnboundToAST :: Constraints tag -> AST tag MetaTypeAST -> M.Infer s ()
-    , actionUnifyUnbounds :: Constraints tag -> Constraints tag -> M.Infer s (Constraints tag)
+    , actionUnifyUnboundToAST ::
+          Order ->
+          (MetaVar tag, Constraints tag) ->
+          (Link tag, AST tag MetaTypeAST) ->
+          M.Infer s ()
+    , actionUnifyUnbounds ::
+          (MetaVar tag, Constraints tag) ->
+          (MetaVar tag, Constraints tag) ->
+          M.Infer s ()
     }
 
 data UnifyEnv tag s = UnifyEnv
@@ -265,13 +126,15 @@ unifyASTs u v =
         UnifyActions{actionUnifyASTs} <- M.askEnv <&> envActions
         actionUnifyASTs u v & infer
 
-unifyUnboundToAST :: Constraints tag -> AST tag MetaTypeAST -> Unify tag s ()
-unifyUnboundToAST u v =
+unifyUnboundToAST ::
+    Order -> (MetaVar tag, Constraints tag) -> (Link tag, AST tag MetaTypeAST) -> Unify tag s ()
+unifyUnboundToAST order u v =
     do
         UnifyActions{actionUnifyUnboundToAST} <- M.askEnv <&> envActions
-        actionUnifyUnboundToAST u v & infer
+        actionUnifyUnboundToAST order u v & infer
 
-unifyUnbounds :: Constraints tag -> Constraints tag -> Unify tag s (Constraints tag)
+unifyUnbounds ::
+    (MetaVar tag, Constraints tag) -> (MetaVar tag, Constraints tag) -> Unify tag s ()
 unifyUnbounds u v =
     do
         UnifyActions{actionUnifyUnbounds} <- M.askEnv <&> envActions
@@ -281,72 +144,202 @@ infer :: M.Infer s a -> Unify tag s a
 infer = M.localEnv envInfer
 
 runUnify ::
-    Monoid (Constraints tag) =>
-    (AST tag MetaTypeAST -> AST tag MetaTypeAST -> M.Infer s ()) ->
-    Unify tag s a -> M.Infer s a
-runUnify f act =
-    M.localEnv
-    (UnifyEnv UnifyActions
-     { actionUnifyASTs = f
-     , actionUnifyUnboundToAST = {-# SCC "constraintsPropagate" #-}constraintsPropagate
-     , actionUnifyUnbounds = \uCs vCs -> return (uCs `mappend` vCs)
-     })
-    act
+    Monoid (Constraints tag) => UnifyActions tag s -> Unify tag s a -> M.Infer s a
+runUnify actions act = M.localEnv (UnifyEnv actions) act
 
-unifyVarAST :: AST tag MetaTypeAST -> MetaVar tag -> Unify tag s ()
-unifyVarAST uAst v =
-    infer (M.repr v) >>= \case
-    (_, Bound vAst) -> unifyASTs uAst vAst
-    (vRef, Unbound vCs) ->
-        do
-            unifyUnboundToAST vCs uAst
-            infer $ M.writeRef vRef $ LinkFinal $ Bound uAst
-
-{-# INLINE unifyUnboundToBound #-}
-unifyUnboundToBound ::
-    MetaVar tag -> Constraints tag -> (MetaVar tag, AST tag MetaTypeAST) ->
-    Unify tag s ()
-unifyUnboundToBound uRef uCs (vRef, vAst) =
-    do
-        unifyUnboundToAST uCs vAst
-        -- link to the final ref, and not to the direct AST info so we
-        -- know to avoid reunify work in future unify calls
-        infer $ M.writeRef uRef $ Link vRef
+unifyVarToAST :: Order -> MetaVar tag -> AST tag MetaTypeAST -> Unify tag s ()
+unifyVarToAST order uVar vAst =
+    infer (M.repr uVar) >>= \case
+    (_, Bound uAst) -> order unifyASTs uAst vAst
+    (uRef, Unbound uCs) ->
+        unifyUnboundToAST order (uRef, uCs) (LinkFinal (Bound vAst), vAst)
 
 unify :: MetaTypeAST tag -> MetaTypeAST tag -> Unify tag s ()
 unify (MetaTypeAST u) (MetaTypeAST v) = unifyASTs u v
-unify (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST u v
-unify (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST v u
+unify (MetaTypeVar u) (MetaTypeAST v) = unifyVarToAST id   u v
+unify (MetaTypeAST u) (MetaTypeVar v) = unifyVarToAST flip v u
 unify (MetaTypeVar u) (MetaTypeVar v) =
     do
         (uRef, ur) <- M.repr u & infer
         (vRef, vr) <- M.repr v & infer
-        -- TODO: Choose which to link into which weight/level-wise
-        let link a b = M.writeRef a $ Link b
         unless (uRef == vRef) $
             case (ur, vr) of
             (Unbound uCs, Unbound vCs) ->
-                do
-                    link uRef vRef & infer
-                    cs <- unifyUnbounds uCs vCs
-                    infer $ M.writeRef vRef $ LinkFinal $ Unbound cs
-            (Unbound uCs, Bound vAst) -> unifyUnboundToBound uRef uCs (vRef, vAst)
-            (Bound uAst, Unbound vCs) -> unifyUnboundToBound vRef vCs (uRef, uAst)
+                unifyUnbounds (uRef, uCs) (vRef, vCs)
+            -- Make link to the other (final) ref, and not to the
+            -- direct AST info so we know to avoid reunify work in
+            -- future unify calls
+            (Unbound uCs, Bound vAst) ->
+                unifyUnboundToAST id (uRef, uCs) (Link vRef, vAst)
+            (Bound uAst, Unbound vCs) ->
+                unifyUnboundToAST flip (vRef, vCs) (Link uRef, uAst)
             (Bound uAst, Bound vAst) ->
                 do
-                    link uRef vRef & infer
+                    writeLink uRef vRef & infer
                     unifyASTs uAst vAst
 
 --------------------
 
-unifyTypeVar :: AST 'TypeT MetaTypeAST -> MetaVar 'TypeT -> M.Infer s ()
-unifyTypeVar ast var = unifyVarAST ast var & runUnify unifyTypeAST
+typeActions :: UnifyActions 'TypeT s
+typeActions =
+    UnifyActions
+    { actionUnifyASTs = unifyTypeAST
+    , actionUnifyUnboundToAST =
+      \_order (uRef, TypeConstraints) (vLink, _vAst) -> M.writeRef uRef vLink
+    , actionUnifyUnbounds =
+      \(uRef, uCs) (vRef, vCs) ->
+      do
+          writeLink uRef vRef
+          M.writeRef vRef $ LinkFinal $ Unbound (uCs `mappend` vCs)
+    }
+
+unifyTypeVar :: MetaVar 'TypeT -> AST 'TypeT MetaTypeAST -> M.Infer s ()
+unifyTypeVar var ast = unifyVarToAST id var ast & runUnify typeActions
+
+unifyType :: MetaType -> MetaType -> M.Infer s ()
+unifyType u v = {-# SCC "unifyType" #-}unify u v & runUnify typeActions
+
+--------------------
+
+-- precondition: size uFields == size vFields
+unifyFields :: CompositeFields -> CompositeFields -> M.Infer s ()
+unifyFields !uFields !vFields =
+    zipWithM_ unifyField (Map.toAscList uFields) (Map.toAscList vFields)
+    where
+        unifyField (uName, uType) (vName, vType)
+            | uName == vName = unifyType uType vType
+            | otherwise =
+              M.throwError $
+              M.DoesNotUnify
+              ("Composite:" <+> pPrint (Map.keys uFields))
+              ("Composite:" <+> pPrint (Map.keys vFields))
+
+mismatchedFields :: [Tag] -> [Tag] -> M.InferEnv env s x
+mismatchedFields u v =
+    M.throwError $
+    M.DoesNotUnify
+    ("Composite:" <+> pPrint u)
+    ("Composite:" <+> pPrint v)
+
+-- We already know we are record vals, and will re-read them
+-- via flatten, so no need for unify's read of these:
+unifyCompositeAST ::
+    IsCompositeTag c =>
+    CompositeFields -> CompositeFields ->
+    Composite c MetaTypeAST ->
+    Composite c MetaTypeAST ->
+    M.Infer s ()
+unifyCompositeAST !uFields !vFields TEmptyComposite TEmptyComposite =
+    unifyFields uFields vFields
+unifyCompositeAST !uFields !vFields TEmptyComposite (TCompositeExtend vn _ _) =
+    mismatchedFields (Map.keys uFields) (vn : Map.keys vFields)
+unifyCompositeAST !uFields !vFields (TCompositeExtend un _ _) TEmptyComposite =
+    mismatchedFields (un : Map.keys uFields) (Map.keys vFields)
+unifyCompositeAST !uFields !vFields (TCompositeExtend un ut ur) (TCompositeExtend vn vt vr)
+    | un == vn =
+        do
+            unifyType ut vt
+            unifyCompositeH uFields vFields ur vr
+    | otherwise =
+      unifyCompositeH (Map.insert un ut uFields) (Map.insert vn vt vFields) ur vr
 
 unifyComposite ::
     IsCompositeTag c => MetaComposite c -> MetaComposite c ->
     M.Infer s ()
-unifyComposite u v =
-    {-# SCC "unifyComposite" #-}unify u v & runUnify unifyCompositeAST
+unifyComposite = unifyCompositeH Map.empty Map.empty
 
-unifyType :: MetaType -> MetaType -> M.Infer s ()
-unifyType u v = {-# SCC "unifyType" #-}unify u v & runUnify unifyTypeAST
+unifyCompositeOpenToClosed ::
+    IsCompositeTag c =>
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
+    CompositeFields -> M.Infer s ()
+unifyCompositeOpenToClosed (uRef, CompositeConstraints uCs, !uFields) !vFields =
+    do
+        -- Validate no disallowed u-fields (not in v):
+        unless (Map.null uniqueUFields) $ M.throwError $
+            M.DoesNotUnify "[]" (pPrint (Map.keys uniqueUFields))
+        -- Validate no disallowed v-fields (in u constraints):
+        unless (null disallowedVFields) $ M.throwError $
+            M.DuplicateFields disallowedVFields
+        let wrapField name typ = TCompositeExtend name typ . MetaTypeAST
+        let uniqueVAST = Map.foldrWithKey wrapField TEmptyComposite uniqueVFields
+        writeFinal uRef (Bound uniqueVAST)
+    where
+        disallowedVFields = Map.keysSet vFields `Set.intersection` uCs & Set.toList
+        uniqueUFields = uFields `Map.difference` vFields
+        uniqueVFields = vFields `Map.difference` uFields
+
+{-# INLINE unifyCompositeOpenToOpen #-}
+unifyCompositeOpenToOpen ::
+    IsCompositeTag c =>
+    CompositeFields ->
+    CompositeFields ->
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
+    M.Infer s ()
+unifyCompositeOpenToOpen !uFields !vFields (uRef, uCs) (vRef, vCs)
+    | Map.null uFields && Map.null vFields =
+      do
+          writeLink uRef vRef
+          writeFinal vRef $ Unbound (uCs `mappend` vCs)
+    | otherwise =
+      do
+          commonRest <- M.freshRef cs
+          let withWrap x = (MetaTypeAST x, LinkFinal (Bound x))
+          let wrapField name typ =
+                  withWrap . TCompositeExtend name typ . fst
+          let wrapFields =
+                  snd . Map.foldrWithKey wrapField
+                  ( MetaTypeVar commonRest
+                  , Link commonRest
+                  )
+          let writeCompositeTail ref = M.writeRef ref . wrapFields
+          writeCompositeTail uRef uniqueVFields
+          writeCompositeTail vRef uniqueUFields
+    where
+        cs = uCs `mappend` vCs
+        uniqueUFields = uFields `Map.difference` vFields
+        uniqueVFields = vFields `Map.difference` uFields
+
+-- precondition: size uFields == size vFields
+-- Unify of an open composite(u) with a partially-known composite(v) (which
+-- may be open or closed)
+unifyCompositeOpenToAST ::
+    CompositeFields ->
+    CompositeFields ->
+    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
+    (Link ('CompositeT c), Type.Composite c MetaTypeAST) ->
+    M.Infer s ()
+unifyCompositeOpenToAST !uFields !vFields (uRef, uCs) (_vLink, vAST) =
+    go vFields vAST
+    where
+        go !allVFields TEmptyComposite =
+            -- v is Closed:
+            unifyCompositeOpenToClosed (uRef, uCs, uFields) allVFields
+        go !allVFields (TCompositeExtend n t r) =
+            case r of
+            MetaTypeAST rest -> go allVFields' rest
+            MetaTypeVar restVar ->
+                M.repr restVar >>= \case
+                (_, Bound rest) -> go allVFields' rest
+                (restRef, Unbound restCs) ->
+                    -- v is Open:
+                    unifyCompositeOpenToOpen uFields allVFields'
+                    (uRef, uCs) (restRef, restCs)
+            where
+                allVFields' = Map.insert n t allVFields
+
+unifyCompositeH ::
+    IsCompositeTag c =>
+    CompositeFields -> CompositeFields ->
+    MetaComposite c -> MetaComposite c ->
+    M.Infer s ()
+unifyCompositeH !uFields !vFields u v =
+    -- TODO: Assert Map.size uFields == Map.size vFields ?
+    {-# SCC "unifyComposite" #-}
+    unify u v
+    & runUnify UnifyActions
+    { actionUnifyASTs = unifyCompositeAST uFields vFields
+    , actionUnifyUnboundToAST =
+      \order -> order unifyCompositeOpenToAST uFields vFields
+    , actionUnifyUnbounds = unifyCompositeOpenToOpen uFields vFields
+    }

@@ -90,7 +90,7 @@ inferApp (Val.App fun arg) =
             MetaTypeVar ref ->
                 do
                     resTyp <- M.freshMetaVar TypeConstraints
-                    unifyTypeVar (TFun argTyp resTyp) ref
+                    unifyTypeVar ref (TFun argTyp resTyp)
                     return resTyp
             MetaTypeAST (TFun paramTyp resTyp) ->
                 do
@@ -113,7 +113,7 @@ inferRecExtend (Val.RecExtend name val rest) =
                         M.freshMetaVar $ CompositeConstraints $
                         Set.singleton name
                     -- TODO (Optimization): ref known to be unbound
-                    unifyTypeVar (TRecord unknownRestFields) ref
+                    unifyTypeVar ref (TRecord unknownRestFields)
                     return unknownRestFields
             MetaTypeAST (TRecord restRecordTyp) ->
                 do
