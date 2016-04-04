@@ -246,14 +246,6 @@ unifyTypeAST (TFun uArg uRes) vTyp =
 -- Generic unify: --
 --                --
 
-unifyUnbound ::
-    MetaVar tag -> Constraints tag -> AST tag MetaTypeAST ->
-    M.Infer s ()
-unifyUnbound ref cs ast =
-    do
-        {-# SCC "constraintsCheck" #-}constraintsCheck cs ast
-        M.writeRef ref $ LinkFinal $ Bound ast
-
 unifyVarAST ::
     (Monoid (Constraints tag)) =>
     (AST tag MetaTypeAST ->
@@ -262,7 +254,20 @@ unifyVarAST ::
 unifyVarAST f uAst v =
     M.repr v >>= \case
     (_, Bound vAst) -> f uAst vAst
-    (vRef, Unbound vCs) -> unifyUnbound vRef vCs uAst
+    (vRef, Unbound vCs) ->
+        do
+            {-# SCC "constraintsCheck" #-}constraintsCheck vCs uAst
+            M.writeRef vRef $ LinkFinal $ Bound uAst
+
+unifyUnboundToBound ::
+    MetaVar tag -> Constraints tag -> (MetaVar tag, AST tag MetaTypeAST) ->
+    M.Infer s ()
+unifyUnboundToBound uRef uCs (vRef, vAst) =
+    do
+        {-# SCC "constraintsCheck" #-}constraintsCheck uCs vAst
+        -- link to the final ref, and not to the direct AST info so we
+        -- know to avoid reunify work in future unify calls
+        M.writeRef uRef $ Link vRef
 
 unify ::
     (Monoid (Constraints tag)) =>
@@ -270,8 +275,10 @@ unify ::
      AST tag MetaTypeAST -> M.Infer s ()) ->
     MetaTypeAST tag -> MetaTypeAST tag -> M.Infer s ()
 unify f (MetaTypeAST u) (MetaTypeAST v) = f u v
-unify f (MetaTypeAST u) (MetaTypeVar v) = unifyVarAST f u v
-unify f (MetaTypeVar u) (MetaTypeAST v) = unifyVarAST f v u
+unify f (MetaTypeAST u) (MetaTypeVar v) =
+    unifyVarAST f u v
+unify f (MetaTypeVar u) (MetaTypeAST v) =
+    unifyVarAST f v u
 unify f (MetaTypeVar u) (MetaTypeVar v) =
     do
         (uRef, ur) <- M.repr u
@@ -284,8 +291,8 @@ unify f (MetaTypeVar u) (MetaTypeVar v) =
                 do
                     link uRef vRef
                     M.writeRef vRef $ LinkFinal $ Unbound $ uCs `mappend` vCs
-            (Unbound uCs, Bound vAst) -> unifyUnbound uRef uCs vAst
-            (Bound uAst, Unbound vCs) -> unifyUnbound vRef vCs uAst
+            (Unbound uCs, Bound vAst) -> unifyUnboundToBound uRef uCs (vRef, vAst)
+            (Bound uAst, Unbound vCs) -> unifyUnboundToBound vRef vCs (uRef, uAst)
             (Bound uAst, Bound vAst) ->
                 do
                     link uRef vRef
