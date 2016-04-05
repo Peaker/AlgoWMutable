@@ -18,15 +18,24 @@ import qualified Data.RefZone as RefZone
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import           Text.PrettyPrint ((<>), (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 data Final tag
     = Unbound (Constraints tag)
     | Bound (Type.AST tag MetaTypeAST)
 
+instance Pretty (Final tag) where
+    pPrint (Unbound cs) = "(?" <> pPrint cs <> ")"
+    pPrint (Bound ast) = "(!" <> pPrint ast <> ")"
+
 data Link tag
     = LinkFinal (Final tag)
     | Link (MetaVar tag)
+
+instance Pretty (Link tag) where
+    pPrint (LinkFinal final) = "LinkFinal" <+> pPrint final
+    pPrint (Link var) = "Link" <+> pPrint var
 
 type MetaVar tag = RefZone.Ref (Link tag)
 
