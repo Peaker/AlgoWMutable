@@ -18,7 +18,7 @@ import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
-import           Lamdu.Expr.Type.Pure (T(..), TVarName(..))
+import           Lamdu.Expr.Type.Pure (T(..))
 import           Lamdu.Expr.Type.Tag (ASTTag(..), RecordT, SumT)
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>), intercalate)
@@ -29,11 +29,11 @@ import           Prelude.Compat
 
 type TVarBinders tag = IntMap (Constraints tag)
 
-tvarBindersToList :: TVarBinders tag -> [(TVarName tag, Constraints tag)]
-tvarBindersToList = map (_1 %~ TVarName) . IntMap.toList
+tvarBindersToList :: TVarBinders tag -> [(Type.TVarName tag, Constraints tag)]
+tvarBindersToList = map (_1 %~ Type.TVarName) . IntMap.toList
 
-tvarBindersFromList :: [(TVarName tag, Constraints tag)] -> TVarBinders tag
-tvarBindersFromList = IntMap.fromList . map (_1 %~ _tVarName)
+tvarBindersFromList :: [(Type.TVarName tag, Constraints tag)] -> TVarBinders tag
+tvarBindersFromList = IntMap.fromList . map (_1 %~ Type._tVarName)
 
 data SchemeBinders = SchemeBinders
     { schemeTypeBinders :: TVarBinders 'TypeT
@@ -67,9 +67,9 @@ data Scheme tag = Scheme
 instance NFData (Scheme tag) where
     rnf (Scheme x y) = rnf x `seq` rnf y
 
-pPrintTV :: (TVarName tag, Constraints tag) -> Doc
+pPrintTV :: (Type.TVarName tag, Constraints tag) -> Doc
 pPrintTV (tv, constraints) =
-    "∀a" <> pPrint tv <> suffix constraints
+    "∀" <> pPrint tv <> suffix constraints
     where
         suffix :: Constraints tag -> Doc
         suffix TypeConstraints = ""
@@ -94,11 +94,15 @@ forAll ::
     Scheme tag
 forAll nTvs nRtvs nStvs mkType =
     Scheme (SchemeBinders cTvs cRtvs cStvs) $
-    mkType (map TVar tvs) (map TVar rtvs) (map TVar stvs)
+    mkType
+    (map mkTv tvNames)
+    (map mkTv rtvNames)
+    (map mkTv stvNames)
     where
-        cTvs = tvarBindersFromList [ (tv, mempty) | tv <- tvs ]
-        cRtvs = tvarBindersFromList [ (tv, mempty) | tv <- rtvs ]
-        cStvs = tvarBindersFromList [ (tv, mempty) | tv <- stvs ]
-        tvs = map TVarName [1..nTvs]
-        rtvs = map TVarName [nTvs+1..nTvs+nRtvs]
-        stvs = map TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
+        mkTv = T . Type.TSkolem
+        cTvs = tvarBindersFromList [ (tv, mempty) | tv <- tvNames ]
+        cRtvs = tvarBindersFromList [ (tv, mempty) | tv <- rtvNames ]
+        cStvs = tvarBindersFromList [ (tv, mempty) | tv <- stvNames ]
+        tvNames = map Type.TVarName [1..nTvs]
+        rtvNames = map Type.TVarName [nTvs+1..nTvs+nRtvs]
+        stvNames = map Type.TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]

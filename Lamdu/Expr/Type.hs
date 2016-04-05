@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -10,9 +11,10 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Lamdu.Expr.Type
     ( NominalId(..), TParamId(..)
+    , TVarName(..)
     , Type, Composite
     , AST(..)
-      , _TFun, _TInst, _TRecord, _TSum
+      , _TFun, _TInst, _TRecord, _TSum, _TSkolem
       , _TEmptyComposite, _TCompositeExtend
     , ntraverse
     ) where
@@ -29,7 +31,7 @@ import           Lamdu.Expr.Type.Tag
     , RecordT, SumT )
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
-import           Text.PrettyPrint ((<+>), text)
+import           Text.PrettyPrint ((<+>), (<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import           Prelude.Compat
@@ -40,7 +42,15 @@ newtype NominalId = NominalId { _nominalId :: Identifier }
 newtype TParamId = TParamId { _tParamId :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
-data AST tag ast where
+newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
+    deriving (Eq, Ord, Show, NFData)
+
+instance Pretty (TVarName tag) where
+    pPrint (TVarName i) = "a" <> pPrint i
+
+data AST (tag :: ASTTag) ast where
+    -- | A skolem is a quantified type-variable (from a Scheme binder)
+    TSkolem :: TVarName tag -> AST tag ast
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> AST 'TypeT ast
     TInst :: {-# UNPACK #-}!NominalId -> !(Map TParamId (ast 'TypeT)) -> AST 'TypeT ast
     TRecord :: !(ast RecordT) -> AST 'TypeT ast
@@ -58,6 +68,7 @@ instance (NFData (ast 'TypeT),
           NFData (ast SumT),
           NFData (ast tag)) =>
          NFData (AST tag ast) where
+    rnf (TSkolem name) = rnf name
     rnf (TFun x y) = rnf x `seq` rnf y
     rnf (TInst n params) = rnf n `seq` rnf params
     rnf (TRecord record) = rnf record
@@ -73,6 +84,7 @@ ntraverse ::
     (ast SumT -> f (ast' SumT)) ->
     AST tag ast -> f (AST tag ast')
 ntraverse onTypes onRecords onSums = \case
+    TSkolem v -> pure (TSkolem v)
     TFun a b -> TFun <$> onTypes a <*> onTypes b
     TInst n params -> TInst n <$> traverse onTypes params
     TRecord r -> TRecord <$> onRecords r
@@ -88,6 +100,12 @@ ntraverse onTypes onRecords onSums = \case
 _TFun :: Lens.Prism' (AST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
 _TFun = Lens.prism' (uncurry TFun) $ \case
     TFun x y -> Just (x, y)
+    _ -> Nothing
+
+{-# INLINE _TSkolem #-}
+_TSkolem :: Lens.Prism' (AST tag ast) (TVarName tag)
+_TSkolem = Lens.prism' TSkolem $ \case
+    TSkolem varName -> Just varName
     _ -> Nothing
 
 {-# INLINE _TInst #-}
@@ -129,6 +147,8 @@ instance (Pretty (ast 'TypeT),
          Pretty (AST tag ast) where
     pPrintPrec level prec ast =
         case ast of
+        TSkolem (TVarName name) ->
+            text "a" <> pPrint name
         TFun a b ->
             maybeParens (prec > 0) $
             pPrintPrec level 1 a <+> "->" <+?> pPrintPrec level 0 b

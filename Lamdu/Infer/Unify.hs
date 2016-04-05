@@ -24,6 +24,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
 import           Data.RefZone (Ref)
+import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Lamdu.Expr.Identifier (Tag(..))
 import           Lamdu.Expr.Type (Type, Composite, AST(..), TParamId)
@@ -92,6 +93,8 @@ unifyTypeAST (TFun uArg uRes) vTyp =
         (vArg, vRes) <- unifyMatch "TFun" vTyp Type._TFun
         unifyType uArg vArg
         unifyType uRes vRes
+unifyTypeAST (TSkolem uName) vTyp =
+    unifyMatch "TSkolem" vTyp (Type._TSkolem . Lens.only uName)
 
 --------------------
 -- Generic unify: --
@@ -242,29 +245,45 @@ unifyCompositeAST !uFields !vFields (TCompositeExtend un ut ur) (TCompositeExten
             unifyCompositeH uFields vFields ur vr
     | otherwise =
       unifyCompositeH (Map.insert un ut uFields) (Map.insert vn vt vFields) ur vr
+unifyCompositeAST _ _ (TSkolem u) v = M.DoesNotUnify (pPrint u) (pPrint v) & M.throwError
+unifyCompositeAST _ _ u (TSkolem v) = M.DoesNotUnify (pPrint u) (pPrint v) & M.throwError
 
 unifyComposite ::
     IsCompositeTag c => MetaComposite c -> MetaComposite c ->
     M.Infer s ()
 unifyComposite = unifyCompositeH Map.empty Map.empty
 
+enforceConstraints :: Set Tag -> Constraints ('CompositeT c) -> M.Infer s ()
+enforceConstraints tags (CompositeConstraints disallowed) =
+    unless (Set.null dups) $ M.throwError $ M.DuplicateFields $ Set.toList dups
+    where
+        dups = disallowed `Set.intersection` tags
+
 unifyCompositeOpenToClosed ::
     IsCompositeTag c =>
     (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
-    CompositeFields -> M.Infer s ()
-unifyCompositeOpenToClosed (uRef, CompositeConstraints uCs, !uFields) !vFields =
+    ( CompositeFields
+    , Maybe (Type.TVarName ('CompositeT c), Constraints ('CompositeT c))
+    ) -> M.Infer s ()
+unifyCompositeOpenToClosed u v =
     do
-        -- Validate no disallowed u-fields (not in v):
         unless (Map.null uniqueUFields) $ M.throwError $
             M.DoesNotUnify "[]" (pPrint (Map.keys uniqueUFields))
+        closedTail <-
+            case mSkolemConstraints of
+            Just (skolemName, skolemConstraints) ->
+                do
+                    enforceConstraints (Map.keysSet uniqueUFields) skolemConstraints
+                    Type.TSkolem skolemName & return
+            Nothing -> return TEmptyComposite
         -- Validate no disallowed v-fields (in u constraints):
-        unless (null disallowedVFields) $ M.throwError $
-            M.DuplicateFields disallowedVFields
+        enforceConstraints (Map.keysSet vFields) uCs
         let wrapField name typ = TCompositeExtend name typ . MetaTypeAST
-        let uniqueVAST = Map.foldrWithKey wrapField TEmptyComposite uniqueVFields
+        let uniqueVAST = Map.foldrWithKey wrapField closedTail uniqueVFields
         writeFinal uRef (Bound uniqueVAST)
     where
-        disallowedVFields = Map.keysSet vFields `Set.intersection` uCs & Set.toList
+        (uRef, uCs, !uFields) = u
+        (!vFields, mSkolemConstraints) = v
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
@@ -304,6 +323,7 @@ unifyCompositeOpenToOpen !uFields !vFields (uRef, uCs) (vRef, vCs)
 -- Unify of an open composite(u) with a partially-known composite(v) (which
 -- may be open or closed)
 unifyCompositeOpenToAST ::
+    IsCompositeTag c =>
     CompositeFields ->
     CompositeFields ->
     (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
@@ -313,8 +333,12 @@ unifyCompositeOpenToAST !uFields !vFields (uRef, uCs) (_vLink, vAST) =
     go vFields vAST
     where
         go !allVFields TEmptyComposite =
-            -- v is Closed:
-            unifyCompositeOpenToClosed (uRef, uCs, uFields) allVFields
+            unifyCompositeOpenToClosed (uRef, uCs, uFields) (allVFields, Nothing)
+        go !allVFields (TSkolem skolemName) =
+            do
+                constraints <- M.lookupSkolem skolemName
+                unifyCompositeOpenToClosed (uRef, uCs, uFields)
+                    (allVFields, Just (skolemName, constraints))
         go !allVFields (TCompositeExtend n t r) =
             case r of
             MetaTypeAST rest -> go allVFields' rest

@@ -9,14 +9,16 @@ module Lamdu.Infer
 
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
+import           Control.Monad (unless)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import           GHC.Exts (inline)
+import           Lamdu.Expr.Identifier (Tag)
 import           Lamdu.Expr.Type (Type, AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Meta
 import           Lamdu.Expr.Type.Scheme (Scheme)
-import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import           Lamdu.Expr.Val (Val(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..))
@@ -27,6 +29,7 @@ import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
 import           Lamdu.Infer.Unify
 import           Pretty.Map ()
+import           Text.PrettyPrint ((<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
@@ -117,7 +120,7 @@ inferRecExtend (Val.RecExtend name val rest) =
                     return unknownRestFields
             MetaTypeAST (TRecord restRecordTyp) ->
                 do
-                    propagateConstraint restRecordTyp
+                    propagateConstraint name restRecordTyp
                     return restRecordTyp
             MetaTypeAST t ->
                 M.DoesNotUnify (pPrint t) "Record type" & M.throwError
@@ -128,17 +131,28 @@ inferRecExtend (Val.RecExtend name val rest) =
             & inferRes (Val.BRecExtend (Val.RecExtend name val' rest'))
             & return
     where
-        propagateConstraint (MetaTypeAST x) = propagateConstraintBound x
-        propagateConstraint (MetaTypeVar ref) =
-            M.repr ref >>= \case
-            (_, Bound ast) -> propagateConstraintBound ast
-            (vRef, Unbound (CompositeConstraints cs)) ->
-                M.writeRef vRef $ LinkFinal $ Unbound $ CompositeConstraints $
-                Set.insert name cs
-        propagateConstraintBound TEmptyComposite = return ()
-        propagateConstraintBound (TCompositeExtend fieldTag _ restTyp)
-            | fieldTag == name = M.DuplicateFields [name] & M.throwError
-            | otherwise = propagateConstraint restTyp
+
+propagateConstraint :: IsCompositeTag c => Tag -> MetaComposite c -> Infer s ()
+propagateConstraint tagName =
+    \case
+    MetaTypeAST x -> toBound x
+    MetaTypeVar ref ->
+        M.repr ref >>= \case
+        (_, Bound ast) -> toBound ast
+        (vRef, Unbound (CompositeConstraints cs)) ->
+            M.writeRef vRef $ LinkFinal $ Unbound $ CompositeConstraints $
+            Set.insert tagName cs
+    where
+        toBound (TSkolem tv) =
+            do
+                CompositeConstraints oldConstraints <- M.lookupSkolem tv
+                unless (tagName `Set.member` oldConstraints) $
+                    M.ConstraintUnavailable tagName ("in skolem" <+> pPrint tv)
+                    & M.throwError
+        toBound TEmptyComposite = return ()
+        toBound (TCompositeExtend fieldTag _ restTyp)
+            | fieldTag == tagName = M.DuplicateFields [tagName] & M.throwError
+            | otherwise = propagateConstraint tagName restTyp
 
 inferCase :: Val.Case V -> Infer s InferResult
 inferCase (Val.Case name handler restHandler) =

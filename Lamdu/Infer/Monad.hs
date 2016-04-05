@@ -19,6 +19,7 @@ module Lamdu.Infer.Monad
     , readRef, writeRef
     , freshMetaVar
     , localScope
+    , lookupSkolem
     , lookupGlobal, lookupLocal
     , instantiate, generalize
     ) where
@@ -44,7 +45,7 @@ import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Meta
     ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..) )
-import           Lamdu.Expr.Type.Pure (T(..), TVarName(..))
+import           Lamdu.Expr.Type.Pure (T(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), ASTTagEquality(..), IsTag(..)
@@ -62,8 +63,10 @@ import           Prelude.Compat
 data Err
     = DoesNotUnify Doc Doc
     | VarNotInScope Var
+    | SkolemNotInScope Doc
     | InfiniteType
     | DuplicateFields [Tag]
+    | ConstraintUnavailable Tag Doc
     deriving (Show)
 
 instance Pretty Err where
@@ -71,11 +74,15 @@ instance Pretty Err where
         "expected:" <+> expected <+> "but got:" <+> got
     pPrint (VarNotInScope name) =
         pPrint name <+> "not in scope!"
+    pPrint (SkolemNotInScope name) =
+        name <+> "not in scope!"
     pPrint InfiniteType =
         "Infinite type encountered"
     pPrint (DuplicateFields names) =
-        "Duplicate fields in record:" <+>
+        "Duplicate tags in composite:" <+>
         (intercalate ", " . map pPrint) names
+    pPrint (ConstraintUnavailable tag skolem) =
+        "Constraints unavailable:" <+> pPrint tag <+> skolem
 
 data Env s = Env
     { envFresh :: STRef s Int
@@ -159,6 +166,11 @@ localScope f = localEnv $ \e -> e { envScope = f (envScope e) }
 askScope :: Infer s (Scope MetaType)
 askScope = askEnv <&> envScope
 
+{-# INLINE lookupSkolem #-}
+lookupSkolem :: IsTag tag => Type.TVarName tag -> Infer s (Constraints tag)
+lookupSkolem v =
+    askScope <&> Scope.lookupSkolem v >>= maybe (throwError (SkolemNotInScope (pPrint v))) return
+
 {-# INLINE lookupLocal #-}
 lookupLocal :: Var -> Infer s (Maybe MetaType)
 lookupLocal v = askScope <&> Scope.lookupLocal v
@@ -185,6 +197,7 @@ freshRef cs = Unbound cs & LinkFinal & newRef
 freshMetaVar :: Constraints tag -> Infer s (MetaTypeAST tag)
 freshMetaVar cs = freshRef cs <&> MetaTypeVar
 
+-- | Convert a Scheme's bound/quantified variables to meta-variables
 instantiate :: forall s tag. IsTag tag => Scheme tag -> Infer s (MetaTypeAST tag)
 instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
     {-# SCC "instantiate" #-}
@@ -193,7 +206,7 @@ instantiate (Scheme (SchemeBinders typeVars recordVars sumVars) typ) =
         recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshMetaVar recordVars
         sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshMetaVar sumVars
         let go :: IntMap (MetaTypeAST t) -> T t -> Infer s (MetaTypeAST t)
-            go binders (TVar (TVarName i)) = return (binders IntMap.! i)
+            go binders (T (Type.TSkolem (Type.TVarName i))) = return (binders IntMap.! i)
             go _ (T typeAST) =
                 Type.ntraverse (go typeUFs) (go recordUFs) (go sumUFs) typeAST
                 <&> MetaTypeAST
@@ -219,8 +232,8 @@ repr x =
                         return (preFinal, final)
         liftST $ go x
 
-schemeBindersSingleton :: forall tag. IsTag tag => TVarName tag -> Constraints tag -> SchemeBinders
-schemeBindersSingleton (TVarName tvName) cs =
+schemeBindersSingleton :: forall tag. IsTag tag => Type.TVarName tag -> Constraints tag -> SchemeBinders
+schemeBindersSingleton (Type.TVarName tvName) cs =
     case tagRefl :: ASTTagEquality tag of
     IsTypeT -> mempty { schemeTypeBinders = binders }
     IsCompositeT IsRecordC -> mempty { schemeRecordBinders = binders }
@@ -275,11 +288,11 @@ derefVar var =
             Bound ast -> derefAST ast & localEnv (derefEnvVisited %~ RefSet.insert ref)
             Unbound cs ->
                 do
-                    tvName <- nextFresh <&> TVarName & derefInfer
+                    tvName <- nextFresh <&> Type.TVarName & derefInfer
                     askEnv
                         <&> derefEnvBinders
                         >>= liftST . flip modifySTRef (schemeBindersSingleton tvName cs <>)
-                    return $ TVar tvName
+                    return $ T $ Type.TSkolem tvName
 
 deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
 deref = \case
@@ -289,6 +302,8 @@ deref = \case
 derefAST :: IsTag tag => Type.AST tag MetaTypeAST -> Deref s (T tag)
 derefAST = fmap T . Type.ntraverse deref deref deref
 
+-- | Convert a meta-type's meta-variables to a scheme with quantified
+-- variables
 generalize :: IsTag tag => MetaTypeAST tag -> Infer s (Scheme tag)
 generalize t =
     {-# SCC "generalize" #-}

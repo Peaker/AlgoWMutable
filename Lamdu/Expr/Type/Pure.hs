@@ -4,9 +4,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
 module Lamdu.Expr.Type.Pure
-    ( T(..), TVarName(..)
+    ( T(..)
     , recordType, compositeFrom, (~>), tInst
     , intType, boolType
     ) where
@@ -18,26 +17,15 @@ import           Lamdu.Expr.Identifier (Tag(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import           Pretty.Map ()
-import           Text.PrettyPrint ((<>), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
-    deriving (Eq, Ord, Show, Pretty, NFData)
-
-data T tag
-    = T (Type.AST tag T)
-    -- HACK: When skolems are properly supported, they'll be qualified
-    -- vars inside the Type.AST itself
-    | TVar (TVarName tag)
-instance NFData (T tag) where
-    rnf (T x) = rnf x
-    rnf (TVar x) = rnf x
+newtype T tag = T (Type.AST tag T)
+instance NFData (T tag) where rnf (T x) = rnf x
 
 instance Pretty (Type.AST tag T) => Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
-    pPrintPrec _ _ (TVar name) = text "a" <> pPrint name
 
 infixr 4 ~>
 (~>) :: T 'TypeT -> T 'TypeT -> T 'TypeT
