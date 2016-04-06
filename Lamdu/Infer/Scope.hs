@@ -13,7 +13,7 @@ module Lamdu.Infer.Scope
     ) where
 
 import           Control.Lens.Operators
-import qualified Control.Lens as Lens
+import qualified Data.IntMap as IntMap
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Lamdu.Expr.Type as Type
@@ -22,12 +22,13 @@ import           Lamdu.Expr.Type.Scheme (Scheme, SchemeBinders(..))
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), IsTag(..), ASTTagEquality(..), CompositeTagEquality(..) )
 import qualified Lamdu.Expr.Val as Val
+import           Lamdu.Infer.Scope.Skolems (SkolemScope(..))
 import           Pretty.Map ()
 
 import           Prelude.Compat
 
 data Scope t = Scope
-    { _scopeSkolems :: SchemeBinders
+    { _scopeSkolems :: SkolemScope
     , _scopeLocals :: Map Val.Var t
     , _scopeGlobals :: Map Val.Var (Scheme 'TypeT)
     }
@@ -49,17 +50,16 @@ lookupSkolem ::
     forall tag t. IsTag tag =>
     Type.TVarName tag -> Scope t -> Maybe (Constraints tag)
 lookupSkolem (Type.TVarName idx) Scope{_scopeSkolems} =
-    case tagRefl :: ASTTagEquality tag  of
-    IsTypeT -> tvBinders ^. Lens.at idx
-    IsCompositeT IsRecordC -> rtvBinders ^. Lens.at idx
-    IsCompositeT IsSumC -> stvBinders ^. Lens.at idx
-    where
-        SchemeBinders tvBinders rtvBinders stvBinders = _scopeSkolems
+    skolemScopeBinders _scopeSkolems
+    & case tagRefl :: ASTTagEquality tag  of
+      IsTypeT                -> IntMap.lookup idx . schemeTypeBinders
+      IsCompositeT IsRecordC -> IntMap.lookup idx . schemeRecordBinders
+      IsCompositeT IsSumC    -> IntMap.lookup idx . schemeSumBinders
 
 {-# INLINE insertLocal #-}
 insertLocal :: Val.Var -> t -> Scope t -> Scope t
 insertLocal name typ (Scope skolems locals globals) =
     Scope skolems (Map.insert name typ locals) globals
 
-skolemScope :: Scope t -> SchemeBinders
+skolemScope :: Scope t -> SkolemScope
 skolemScope = _scopeSkolems
