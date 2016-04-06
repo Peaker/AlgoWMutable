@@ -14,7 +14,7 @@ test/benchmark.O1: test/benchmark.hs
 test/benchmark.p: test/benchmark.hs
 	${GHC} ${P_FLAGS}
 
-test/benchmark.p.prof: benchmark.p
+benchmark.p.prof: test/benchmark.p
 	./$< +RTS -p
 
 %.result: %
