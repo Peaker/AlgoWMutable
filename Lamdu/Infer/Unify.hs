@@ -188,6 +188,8 @@ typeActions =
     UnifyActions
     { actionUnifyASTs = unifyTypeAST
     , actionUnifyUnboundToAST =
+      -- In theory, verify constraints here. We match
+      -- "TypeConstraints" to show that no such verification is needed
       \_order (uRef, MetaVarInfo TypeConstraints) (vLink, _vAst) -> M.writeRef uRef vLink
     , actionUnifyUnbounds =
       \(uRef, uCs) (vRef, vCs) ->
