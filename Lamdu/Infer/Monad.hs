@@ -289,7 +289,7 @@ deref = \case
 derefAST :: IsTag tag => Type.AST tag MetaTypeAST -> Deref s (T tag)
 derefAST = fmap T . Type.ntraverse deref deref deref
 
-generalize :: MetaType -> Infer s (Scheme 'TypeT)
+generalize :: IsTag tag => MetaTypeAST tag -> Infer s (Scheme tag)
 generalize t =
     {-# SCC "generalize" #-}
     do
