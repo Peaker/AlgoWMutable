@@ -107,12 +107,12 @@ data UnifyActions tag s = UnifyActions
     { actionUnifyASTs :: AST tag MetaTypeAST -> AST tag MetaTypeAST -> M.Infer s ()
     , actionUnifyUnboundToAST ::
           Order ->
-          (MetaVar tag, Constraints tag) ->
+          (MetaVar tag, MetaVarInfo tag) ->
           (Link tag, AST tag MetaTypeAST) ->
           M.Infer s ()
     , actionUnifyUnbounds ::
-          (MetaVar tag, Constraints tag) ->
-          (MetaVar tag, Constraints tag) ->
+          (MetaVar tag, MetaVarInfo tag) ->
+          (MetaVar tag, MetaVarInfo tag) ->
           M.Infer s ()
     }
 
@@ -130,14 +130,14 @@ unifyASTs u v =
         actionUnifyASTs u v & infer
 
 unifyUnboundToAST ::
-    Order -> (MetaVar tag, Constraints tag) -> (Link tag, AST tag MetaTypeAST) -> Unify tag s ()
+    Order -> (MetaVar tag, MetaVarInfo tag) -> (Link tag, AST tag MetaTypeAST) -> Unify tag s ()
 unifyUnboundToAST order u v =
     do
         UnifyActions{actionUnifyUnboundToAST} <- M.askEnv <&> envActions
         actionUnifyUnboundToAST order u v & infer
 
 unifyUnbounds ::
-    (MetaVar tag, Constraints tag) -> (MetaVar tag, Constraints tag) -> Unify tag s ()
+    (MetaVar tag, MetaVarInfo tag) -> (MetaVar tag, MetaVarInfo tag) -> Unify tag s ()
 unifyUnbounds u v =
     do
         UnifyActions{actionUnifyUnbounds} <- M.askEnv <&> envActions
@@ -154,8 +154,8 @@ unifyVarToAST :: Order -> MetaVar tag -> AST tag MetaTypeAST -> Unify tag s ()
 unifyVarToAST order uVar vAst =
     infer (M.repr uVar) >>= \case
     (_, Bound uAst) -> order unifyASTs uAst vAst
-    (uRef, Unbound uCs) ->
-        unifyUnboundToAST order (uRef, uCs) (LinkFinal (Bound vAst), vAst)
+    (uRef, Unbound uInfo) ->
+        unifyUnboundToAST order (uRef, uInfo) (LinkFinal (Bound vAst), vAst)
 
 unify :: MetaTypeAST tag -> MetaTypeAST tag -> Unify tag s ()
 unify (MetaTypeAST u) (MetaTypeAST v) = unifyASTs u v
@@ -167,15 +167,15 @@ unify (MetaTypeVar u) (MetaTypeVar v) =
         (vRef, vr) <- M.repr v & infer
         unless (uRef == vRef) $
             case (ur, vr) of
-            (Unbound uCs, Unbound vCs) ->
-                unifyUnbounds (uRef, uCs) (vRef, vCs)
+            (Unbound uInfo, Unbound vInfo) ->
+                unifyUnbounds (uRef, uInfo) (vRef, vInfo)
             -- Make link to the other (final) ref, and not to the
             -- direct AST info so we know to avoid reunify work in
             -- future unify calls
-            (Unbound uCs, Bound vAst) ->
-                unifyUnboundToAST id (uRef, uCs) (Link vRef, vAst)
-            (Bound uAst, Unbound vCs) ->
-                unifyUnboundToAST flip (vRef, vCs) (Link uRef, uAst)
+            (Unbound uInfo, Bound vAst) ->
+                unifyUnboundToAST id (uRef, uInfo) (Link vRef, vAst)
+            (Bound uAst, Unbound vInfo) ->
+                unifyUnboundToAST flip (vRef, vInfo) (Link uRef, uAst)
             (Bound uAst, Bound vAst) ->
                 do
                     writeLink uRef vRef & infer
@@ -188,7 +188,7 @@ typeActions =
     UnifyActions
     { actionUnifyASTs = unifyTypeAST
     , actionUnifyUnboundToAST =
-      \_order (uRef, TypeConstraints) (vLink, _vAst) -> M.writeRef uRef vLink
+      \_order (uRef, MetaVarInfo TypeConstraints) (vLink, _vAst) -> M.writeRef uRef vLink
     , actionUnifyUnbounds =
       \(uRef, uCs) (vRef, vCs) ->
       do
@@ -261,7 +261,7 @@ enforceConstraints tags (CompositeConstraints disallowed) =
 
 unifyCompositeOpenToClosed ::
     IsCompositeTag c =>
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c), CompositeFields) ->
+    (MetaVar ('CompositeT c), MetaVarInfo ('CompositeT c), CompositeFields) ->
     ( CompositeFields
     , Maybe (Type.TVarName ('CompositeT c), Constraints ('CompositeT c))
     ) -> M.Infer s ()
@@ -282,7 +282,7 @@ unifyCompositeOpenToClosed u v =
         let uniqueVAST = Map.foldrWithKey wrapField closedTail uniqueVFields
         writeFinal uRef (Bound uniqueVAST)
     where
-        (uRef, uCs, !uFields) = u
+        (uRef, MetaVarInfo uCs, !uFields) = u
         (!vFields, mSkolemConstraints) = v
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
@@ -292,17 +292,17 @@ unifyCompositeOpenToOpen ::
     IsCompositeTag c =>
     CompositeFields ->
     CompositeFields ->
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
+    (MetaVar ('CompositeT c), MetaVarInfo ('CompositeT c)) ->
+    (MetaVar ('CompositeT c), MetaVarInfo ('CompositeT c)) ->
     M.Infer s ()
-unifyCompositeOpenToOpen !uFields !vFields (uRef, uCs) (vRef, vCs)
+unifyCompositeOpenToOpen !uFields !vFields (uRef, uInfo) (vRef, vInfo)
     | Map.null uFields && Map.null vFields =
       do
           writeLink uRef vRef
-          writeFinal vRef $ Unbound (uCs `mappend` vCs)
+          writeFinal vRef $ Unbound (uInfo `mappend` vInfo)
     | otherwise =
       do
-          commonRest <- M.freshRef cs
+          commonRest <- M.freshRefWith info
           let withWrap x = (MetaTypeAST x, LinkFinal (Bound x))
           let wrapField name typ =
                   withWrap . TCompositeExtend name typ . fst
@@ -315,7 +315,7 @@ unifyCompositeOpenToOpen !uFields !vFields (uRef, uCs) (vRef, vCs)
           writeCompositeTail uRef uniqueVFields
           writeCompositeTail vRef uniqueUFields
     where
-        cs = uCs `mappend` vCs
+        info = uInfo `mappend` vInfo
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
@@ -326,18 +326,18 @@ unifyCompositeOpenToAST ::
     IsCompositeTag c =>
     CompositeFields ->
     CompositeFields ->
-    (MetaVar ('CompositeT c), Constraints ('CompositeT c)) ->
+    (MetaVar ('CompositeT c), MetaVarInfo ('CompositeT c)) ->
     (Link ('CompositeT c), Type.Composite c MetaTypeAST) ->
     M.Infer s ()
-unifyCompositeOpenToAST !uFields !vFields (uRef, uCs) (_vLink, vAST) =
+unifyCompositeOpenToAST !uFields !vFields (uRef, uInfo) (_vLink, vAST) =
     go vFields vAST
     where
         go !allVFields TEmptyComposite =
-            unifyCompositeOpenToClosed (uRef, uCs, uFields) (allVFields, Nothing)
+            unifyCompositeOpenToClosed (uRef, uInfo, uFields) (allVFields, Nothing)
         go !allVFields (TSkolem skolemName) =
             do
                 constraints <- M.lookupSkolem skolemName
-                unifyCompositeOpenToClosed (uRef, uCs, uFields)
+                unifyCompositeOpenToClosed (uRef, uInfo, uFields)
                     (allVFields, Just (skolemName, constraints))
         go !allVFields (TCompositeExtend n t r) =
             case r of
@@ -345,10 +345,10 @@ unifyCompositeOpenToAST !uFields !vFields (uRef, uCs) (_vLink, vAST) =
             MetaTypeVar restVar ->
                 M.repr restVar >>= \case
                 (_, Bound rest) -> go allVFields' rest
-                (restRef, Unbound restCs) ->
+                (restRef, Unbound restInfo) ->
                     -- v is Open:
                     unifyCompositeOpenToOpen uFields allVFields'
-                    (uRef, uCs) (restRef, restCs)
+                    (uRef, uInfo) (restRef, restInfo)
             where
                 allVFields' = Map.insert n t allVFields
 

@@ -1,4 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -9,6 +11,7 @@
 module Lamdu.Infer.Meta
     ( Final(..), _Unbound, _Bound
     , Link(..), _LinkFinal, _Link
+    , MetaVarInfo(..)
     , MetaVar, MetaTypeAST(..), MetaType, MetaComposite
     ) where
 
@@ -21,8 +24,20 @@ import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import           Text.PrettyPrint ((<>), (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
+import           Prelude.Compat
+
+newtype MetaVarInfo tag = MetaVarInfo
+   { metaVarConstraints :: Constraints tag
+   } deriving (Pretty)
+
+instance Monoid (Constraints tag) => Monoid (MetaVarInfo tag) where
+    {-# INLINE mempty #-}
+    mempty = MetaVarInfo mempty
+    {-# INLINE mappend #-}
+    mappend (MetaVarInfo x) (MetaVarInfo y) = MetaVarInfo (mappend x y)
+
 data Final tag
-    = Unbound (Constraints tag)
+    = Unbound (MetaVarInfo tag)
     | Bound (Type.AST tag MetaTypeAST)
 
 instance Pretty (Final tag) where

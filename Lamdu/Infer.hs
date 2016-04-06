@@ -139,8 +139,8 @@ propagateConstraint tagName =
     MetaTypeVar ref ->
         M.repr ref >>= \case
         (_, Bound ast) -> toBound ast
-        (vRef, Unbound (CompositeConstraints cs)) ->
-            M.writeRef vRef $ LinkFinal $ Unbound $ CompositeConstraints $
+        (vRef, Unbound (MetaVarInfo (CompositeConstraints cs))) ->
+            M.writeRef vRef $ LinkFinal $ Unbound $ MetaVarInfo $ CompositeConstraints $
             Set.insert tagName cs
     where
         toBound (TSkolem tv) =

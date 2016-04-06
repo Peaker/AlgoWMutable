@@ -15,7 +15,7 @@ module Lamdu.Infer.Monad
     , Err(..), throwError
     , runInfer
     , repr
-    , freshRef
+    , freshRef, freshRefWith
     , readRef, writeRef
     , freshMetaVar
     , localScope
@@ -44,7 +44,7 @@ import           Lamdu.Expr.Identifier (Tag(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Infer.Meta
-    ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..) )
+    ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..), MetaVarInfo(..) )
 import           Lamdu.Expr.Type.Pure (T(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
 import           Lamdu.Expr.Type.Tag
@@ -189,9 +189,19 @@ nextFresh =
         return new
     & liftST
 
+{-# INLINE freshRefWith #-}
+freshRefWith :: MetaVarInfo tag -> Infer s (MetaVar tag)
+freshRefWith = newRef . LinkFinal . Unbound
+
 {-# INLINE freshRef #-}
 freshRef :: Constraints tag -> Infer s (MetaVar tag)
-freshRef cs = Unbound cs & LinkFinal & newRef
+freshRef cs =
+    cs
+    -- TODO: skolemScope <- askScope <&> Scope.skolemScope
+    & mkInfo
+    & freshRefWith
+    where
+        mkInfo = MetaVarInfo -- TODO: skolemScope
 
 {-# INLINE freshMetaVar #-}
 freshMetaVar :: Constraints tag -> Infer s (MetaTypeAST tag)
@@ -286,12 +296,13 @@ derefVar var =
         derefMemoize ref $
             case final of
             Bound ast -> derefAST ast & localEnv (derefEnvVisited %~ RefSet.insert ref)
-            Unbound cs ->
+            Unbound info ->
                 do
                     tvName <- nextFresh <&> Type.TVarName & derefInfer
                     askEnv
                         <&> derefEnvBinders
-                        >>= liftST . flip modifySTRef (schemeBindersSingleton tvName cs <>)
+                        >>= liftST . flip modifySTRef
+                            (schemeBindersSingleton tvName (metaVarConstraints info) <>)
                     return $ T $ Type.TSkolem tvName
 
 deref :: IsTag tag => MetaTypeAST tag -> Deref s (T tag)
