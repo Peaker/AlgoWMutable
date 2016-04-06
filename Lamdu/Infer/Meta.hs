@@ -6,7 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- | Types with meta-variables
 
-module Lamdu.Expr.Type.Meta
+module Lamdu.Infer.Meta
     ( Final(..), _Unbound, _Bound
     , Link(..), _LinkFinal, _Link
     , MetaVar, MetaTypeAST(..), MetaType, MetaComposite

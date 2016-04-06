@@ -16,7 +16,7 @@ import           GHC.Exts (inline)
 import           Lamdu.Expr.Identifier (Tag)
 import           Lamdu.Expr.Type (Type, AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
-import           Lamdu.Expr.Type.Meta
+import           Lamdu.Infer.Meta
 import           Lamdu.Expr.Type.Scheme (Scheme)
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import           Lamdu.Expr.Val (Val(..))

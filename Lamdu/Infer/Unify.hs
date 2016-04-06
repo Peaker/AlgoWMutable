@@ -30,7 +30,7 @@ import           Lamdu.Expr.Identifier (Tag(..))
 import           Lamdu.Expr.Type (Type, Composite, AST(..), TParamId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
-import           Lamdu.Expr.Type.Meta
+import           Lamdu.Infer.Meta
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import qualified Lamdu.Infer.Monad as M
 import           Pretty.Map ()

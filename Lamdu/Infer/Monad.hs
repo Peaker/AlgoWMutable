@@ -43,7 +43,7 @@ import           Data.STRef
 import           Lamdu.Expr.Identifier (Tag(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
-import           Lamdu.Expr.Type.Meta
+import           Lamdu.Infer.Meta
     ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..) )
 import           Lamdu.Expr.Type.Pure (T(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
