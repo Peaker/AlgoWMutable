@@ -6,6 +6,7 @@
 {-# LANGUAGE DataKinds #-}
 module Lamdu.Infer.Scope
     ( Scope
+    , skolemScope
     , newScope, emptyScope
     , insertLocal
     , lookupLocal, lookupGlobal, lookupSkolem
@@ -59,3 +60,6 @@ lookupSkolem (Type.TVarName idx) Scope{_scopeSkolems} =
 insertLocal :: Val.Var -> t -> Scope t -> Scope t
 insertLocal name typ (Scope skolems locals globals) =
     Scope skolems (Map.insert name typ locals) globals
+
+skolemScope :: Scope t -> SchemeBinders
+skolemScope = _scopeSkolems
