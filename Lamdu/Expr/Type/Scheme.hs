@@ -1,12 +1,13 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
 module Lamdu.Expr.Type.Scheme
     ( TVarBinders
-    , SchemeBinders(..)
+    , SchemeBinders(..), schemeBindersLookup
     , Scheme(..), forAll
     ) where
 
@@ -19,7 +20,9 @@ import qualified Data.Set as Set
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Pure (T(..))
-import           Lamdu.Expr.Type.Tag (ASTTag(..), RecordT, SumT)
+import           Lamdu.Expr.Type.Tag
+    ( IsTag(..), RecordT, SumT, ASTTag(..), ASTTagEquality(..)
+    , CompositeTagEquality(..) )
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>), intercalate)
 import           Text.PrettyPrint (Doc, (<>))
@@ -106,3 +109,12 @@ forAll nTvs nRtvs nStvs mkType =
         tvNames = map Type.TVarName [1..nTvs]
         rtvNames = map Type.TVarName [nTvs+1..nTvs+nRtvs]
         stvNames = map Type.TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
+
+schemeBindersLookup ::
+    forall tag. IsTag tag =>
+    Type.TVarName tag -> SchemeBinders -> Maybe (Constraints tag)
+schemeBindersLookup (Type.TVarName idx) =
+    case tagRefl :: ASTTagEquality tag  of
+    IsTypeT                -> IntMap.lookup idx . schemeTypeBinders
+    IsCompositeT IsRecordC -> IntMap.lookup idx . schemeRecordBinders
+    IsCompositeT IsSumC    -> IntMap.lookup idx . schemeSumBinders

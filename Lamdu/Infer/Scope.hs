@@ -13,14 +13,12 @@ module Lamdu.Infer.Scope
     ) where
 
 import           Control.Lens.Operators
-import qualified Data.IntMap as IntMap
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
-import           Lamdu.Expr.Type.Scheme (Scheme, SchemeBinders(..))
-import           Lamdu.Expr.Type.Tag
-    ( ASTTag(..), IsTag(..), ASTTagEquality(..), CompositeTagEquality(..) )
+import           Lamdu.Expr.Type.Scheme (Scheme, schemeBindersLookup)
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Infer.Scope.Skolems (SkolemScope(..))
 import           Pretty.Map ()
@@ -49,12 +47,9 @@ lookupGlobal v Scope{_scopeGlobals} = Map.lookup v _scopeGlobals
 lookupSkolem ::
     forall tag t. IsTag tag =>
     Type.TVarName tag -> Scope t -> Maybe (Constraints tag)
-lookupSkolem (Type.TVarName idx) Scope{_scopeSkolems} =
+lookupSkolem tVarName Scope{_scopeSkolems} =
     skolemScopeBinders _scopeSkolems
-    & case tagRefl :: ASTTagEquality tag  of
-      IsTypeT                -> IntMap.lookup idx . schemeTypeBinders
-      IsCompositeT IsRecordC -> IntMap.lookup idx . schemeRecordBinders
-      IsCompositeT IsSumC    -> IntMap.lookup idx . schemeSumBinders
+    & schemeBindersLookup tVarName
 
 {-# INLINE insertLocal #-}
 insertLocal :: Val.Var -> t -> Scope t -> Scope t
