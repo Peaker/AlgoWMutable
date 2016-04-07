@@ -1,6 +1,6 @@
 -- | Phantom type-level tags for types & composites
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 module Lamdu.Expr.Type.Tag
     ( CompositeTag(..), CompositeTagEquality(..), IsCompositeTag(..)
