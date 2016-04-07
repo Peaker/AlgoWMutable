@@ -64,6 +64,7 @@ data Err
     = DoesNotUnify Doc Doc
     | VarNotInScope Var
     | SkolemNotInScope Doc
+    | SkolemEscapes Doc
     | InfiniteType
     | DuplicateFields [Tag]
     | ConstraintUnavailable Tag Doc
@@ -76,6 +77,8 @@ instance Pretty Err where
         pPrint name <+> "not in scope!"
     pPrint (SkolemNotInScope name) =
         name <+> "not in scope!"
+    pPrint (SkolemEscapes name) =
+        name <+> "escapes its scope (value is not polymorphic enough)!"
     pPrint InfiniteType =
         "Infinite type encountered"
     pPrint (DuplicateFields names) =
@@ -196,12 +199,9 @@ freshRefWith = newRef . LinkFinal . Unbound
 {-# INLINE freshRef #-}
 freshRef :: Constraints tag -> Infer s (MetaVar tag)
 freshRef cs =
-    cs
-    -- TODO: skolemScope <- askScope <&> Scope.skolemScope
-    & mkInfo
-    & freshRefWith
-    where
-        mkInfo = MetaVarInfo -- TODO: skolemScope
+    do
+        skolemScope <- askScope <&> Scope.skolemScope
+        MetaVarInfo cs skolemScope & freshRefWith
 
 {-# INLINE freshMetaVar #-}
 freshMetaVar :: Constraints tag -> Infer s (MetaTypeAST tag)

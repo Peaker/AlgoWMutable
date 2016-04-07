@@ -21,20 +21,27 @@ import qualified Data.RefZone as RefZone
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import           Lamdu.Infer.Scope.Skolems (SkolemScope)
 import           Text.PrettyPrint ((<>), (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-newtype MetaVarInfo tag = MetaVarInfo
+data MetaVarInfo tag = MetaVarInfo
    { metaVarConstraints :: Constraints tag
-   } deriving (Pretty)
+   , metaVarSkolemScope :: SkolemScope
+   }
+
+instance Pretty (MetaVarInfo tag) where
+    pPrint (MetaVarInfo constraints skolems) =
+        "Info{" <> pPrint constraints <> pPrint skolems <> "}"
 
 instance Monoid (Constraints tag) => Monoid (MetaVarInfo tag) where
     {-# INLINE mempty #-}
-    mempty = MetaVarInfo mempty
+    mempty = MetaVarInfo mempty mempty
     {-# INLINE mappend #-}
-    mappend (MetaVarInfo x) (MetaVarInfo y) = MetaVarInfo (mappend x y)
+    mappend (MetaVarInfo x0 y0) (MetaVarInfo x1 y1) =
+        MetaVarInfo (mappend x0 x1) (mappend y0 y1)
 
 data Final tag
     = Unbound (MetaVarInfo tag)

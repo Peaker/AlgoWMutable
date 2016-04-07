@@ -30,9 +30,11 @@ import           Lamdu.Expr.Identifier (Tag(..))
 import           Lamdu.Expr.Type (Type, Composite, AST(..), TParamId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
+import           Lamdu.Expr.Type.Scheme (schemeBindersLookup)
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..), IsTag(..))
 import           Lamdu.Infer.Meta
-import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import qualified Lamdu.Infer.Monad as M
+import           Lamdu.Infer.Scope.Skolems (SkolemScope(..))
 import           Pretty.Map ()
 import           Text.PrettyPrint (Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
@@ -183,6 +185,15 @@ unify (MetaTypeVar u) (MetaTypeVar v) =
 
 --------------------
 
+checkSkolemEscape :: IsTag tag => SkolemScope -> Type.TVarName tag -> M.InferEnv env s ()
+checkSkolemEscape skolemScope name =
+    unless isInScope $ M.throwError $ M.SkolemEscapes $ pPrint name
+    where
+        isInScope =
+            skolemScopeBinders skolemScope
+            & schemeBindersLookup name
+            & Lens.has Lens._Just
+
 typeActions :: UnifyActions 'TypeT s
 typeActions =
     UnifyActions
@@ -190,12 +201,17 @@ typeActions =
     , actionUnifyUnboundToAST =
       -- In theory, verify constraints here. We match
       -- "TypeConstraints" to show that no such verification is needed
-      \_order (uRef, MetaVarInfo TypeConstraints) (vLink, _vAst) -> M.writeRef uRef vLink
+      \_order (uRef, MetaVarInfo TypeConstraints uSkolemScope) (vLink, vAst) ->
+      do
+          case vAst of
+              TSkolem vName -> checkSkolemEscape uSkolemScope vName
+              _ -> return ()
+          M.writeRef uRef vLink
     , actionUnifyUnbounds =
-      \(uRef, uCs) (vRef, vCs) ->
+      \(uRef, uVarInfo) (vRef, vVarInfo) ->
       do
           writeLink uRef vRef
-          M.writeRef vRef $ LinkFinal $ Unbound (uCs `mappend` vCs)
+          M.writeRef vRef $ LinkFinal $ Unbound $ uVarInfo `mappend` vVarInfo
     }
 
 unifyTypeVar :: MetaVar 'TypeT -> AST 'TypeT MetaTypeAST -> M.Infer s ()
@@ -272,11 +288,12 @@ unifyCompositeOpenToClosed u v =
         unless (Map.null uniqueUFields) $ M.throwError $
             M.DoesNotUnify "[]" (pPrint (Map.keys uniqueUFields))
         closedTail <-
-            case mSkolemConstraints of
-            Just (skolemName, skolemConstraints) ->
+            case vMSkolemConstraints of
+            Just (vSkolemName, vSkolemConstraints) ->
                 do
-                    enforceConstraints (Map.keysSet uniqueUFields) skolemConstraints
-                    Type.TSkolem skolemName & return
+                    checkSkolemEscape uSkolemScope vSkolemName
+                    enforceConstraints (Map.keysSet uniqueUFields) vSkolemConstraints
+                    Type.TSkolem vSkolemName & return
             Nothing -> return TEmptyComposite
         -- Validate no disallowed v-fields (in u constraints):
         enforceConstraints (Map.keysSet vFields) uCs
@@ -284,8 +301,8 @@ unifyCompositeOpenToClosed u v =
         let uniqueVAST = Map.foldrWithKey wrapField closedTail uniqueVFields
         writeFinal uRef (Bound uniqueVAST)
     where
-        (uRef, MetaVarInfo uCs, !uFields) = u
-        (!vFields, mSkolemConstraints) = v
+        (uRef, MetaVarInfo uCs uSkolemScope, !uFields) = u
+        (!vFields, vMSkolemConstraints) = v
         uniqueUFields = uFields `Map.difference` vFields
         uniqueVFields = vFields `Map.difference` uFields
 
