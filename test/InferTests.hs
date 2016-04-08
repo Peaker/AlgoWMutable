@@ -3,9 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main
     ( test
-    , example1, example2, example3, example4, example5
-    , example6, example7, example8, example9, example10
-    , example11, example12, example13, example14, example15, example16
+    , examples
     , tests, main
     ) where
 
@@ -30,89 +28,44 @@ test x =
     Right (_, typ) -> " :: " <+> pPrint typ
 
 
-example1 :: V
-example1 = V.lam "x" $ V.lam "y" $ V.var "x" $$ V.var "y" $$ V.var "y"
-
-example2 :: V
-example2 = V.lam "x" $ V.recVal [] & "x" $= V.var "x" & "y" $= V.lambda "x" id
-
-example3 :: V
-example3 = V.lam "x" $ (V.var "x" $. "y") $$ V.lambda "a" id
-
-example4 :: V
-example4 = V.lam "x" $ V.var "x" $$ V.var "x"
-
-example5 :: V
-example5 = V.lam "x" $ (V.var "x" $. "y") $$ (V.var "x" $. "y")
-
-example6 :: V
-example6 = V.recVal [("x", V.recVal []), ("y", V.recVal [])]
-
-example7 :: V
-example7 =
-    V.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
-
-example8 :: V
-example8 =
-    V.lambda "g" $ \g ->
-    V.lambda "f" $ \f ->
-    V.lambda "x" $ \x ->
-    g $$ (f $$ "Just" .$ x)
-      $$ (f $$ "Nothing" .$ V.recVal [])
-
-example9 :: V
-example9 =
-    V.cases
-    [ ("Nothing", V.lam "_" (V.litInt 0))
-    , ("Just", V.lambda "x" $ \x -> V.litInt 1 $+ x)
+examples :: [V]
+examples =
+    [ V.lam "x" $ V.lam "y" $ V.var "x" $$ V.var "y" $$ V.var "y"
+    , V.lam "x" $ V.recVal [] & "x" $= V.var "x" & "y" $= V.lambda "x" id
+    , V.lam "x" $ (V.var "x" $. "y") $$ V.lambda "a" id
+    , V.lam "x" $ V.var "x" $$ V.var "x"
+    , V.lam "x" $ (V.var "x" $. "y") $$ (V.var "x" $. "y")
+    , V.recVal [("x", V.recVal []), ("y", V.recVal [])]
+    , V.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
+    , V.lambda "g" $ \g ->
+      V.lambda "f" $ \f ->
+      V.lambda "x" $ \x ->
+      g $$ (f $$ "Just" .$ x)
+        $$ (f $$ "Nothing" .$ V.recVal [])
+    , V.cases
+      [ ("Nothing", V.lam "_" (V.litInt 0))
+      , ("Just", V.lambda "x" $ \x -> V.litInt 1 $+ x)
+      ]
+    , V.lambda "f" $ \f ->
+      V.lambda "x" $ \x ->
+      (x $. "a")
+      $$ (f $$ x)
+      $$ (f $$ V.recVal [("a", V.hole)])
+    , V.lambda "f" $ \f ->
+      V.lambda "x" $ \x ->
+      f $$ (x $. "a") $$ x
+    , V.fromNom (fst Vals.listTypePair) $ V.lambda "x" $ \x -> x
+    , V.fromNom (fst Vals.listTypePair) V.hole
+    , V.fromNom (fst Vals.stTypePair) V.hole
+    , V.var "runST" $$ V.hole
+    , V.fromNom (fst Vals.closedStTypePair) V.hole
+    , V.toNom (fst Vals.closedStTypePair) V.hole
+    , V.toNom (fst Vals.closedStTypePair) (V.litInt 1)
+    , V.lambda "x" $ V.toNom (fst Vals.closedStTypePair)
     ]
-
-example10 :: V
-example10 =
-    V.lambda "f" $ \f ->
-    V.lambda "x" $ \x ->
-    (x $. "a")
-    $$ (f $$ x)
-    $$ (f $$ V.recVal [("a", V.hole)])
-
-example11 :: V
-example11 =
-    V.lambda "f" $ \f ->
-    V.lambda "x" $ \x ->
-    f $$ (x $. "a") $$ x
-
-example12 :: V
-example12 = V.fromNom (fst Vals.listTypePair) $ V.lambda "x" $ \x -> x
-
-example13 :: V
-example13 = V.fromNom (fst Vals.listTypePair) V.hole
-
-example14 :: V
-example14 = V.fromNom (fst Vals.stTypePair) V.hole
-
-example15 :: V
-example15 = V.var "runST" $$ V.hole
-
-example16 :: V
-example16 = V.fromNom (fst Vals.closedStTypePair) V.hole
 
 tests :: Doc
-tests =
-    vcat $ map test
-    [ example1
-    , example2
-    , example3
-    , example4
-    , example5
-    , example6
-    , example7
-    , example8
-    , example9
-    , example10
-    , example11
-    , example12
-    , example13
-    ]
+tests = vcat $ map test examples
 
 main :: IO ()
 main = print tests

@@ -87,6 +87,7 @@ data Val v
     | BGetField (GetField v)
     | BInject (Inject v)
     | BFromNom (Nom v)
+    | BToNom (Nom v)
     | BLeaf Leaf
     deriving (Show, Functor, Foldable, Traversable)
 
@@ -97,6 +98,7 @@ instance NFData v => NFData (Val v) where
     rnf (BCase x) = rnf x
     rnf (BGetField x) = rnf x
     rnf (BFromNom x) = rnf x
+    rnf (BToNom x) = rnf x
     rnf (BInject x) = rnf x
     rnf (BLeaf x) = rnf x
 
@@ -123,8 +125,11 @@ instance Pretty v => Pretty (Val v) where
     pPrintPrec level prec (BInject (Inject name val)) =
         maybeParens (prec > 8) $
         pPrint name <+> pPrintPrec level 8 val
+    pPrintPrec level prec (BToNom (Nom tId val)) =
+        maybeParens (prec > 5) $
+        pPrint tId <> "«" <> pPrintPrec level 5 val
     pPrintPrec level prec (BFromNom (Nom tId val)) =
         maybeParens (prec > 5) $
-        pPrintPrec level 5 val <+> "»" <> pPrint tId
+        pPrintPrec level 5 val <> "»" <> pPrint tId
     pPrintPrec level prec (BLeaf leaf) = pPrintPrec level prec leaf
 

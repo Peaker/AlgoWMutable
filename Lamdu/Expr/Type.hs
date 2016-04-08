@@ -15,11 +15,12 @@ module Lamdu.Expr.Type
     , AST(..)
       , _TFun, _TInst, _TRecord, _TSum, _TSkolem
       , _TEmptyComposite, _TCompositeExtend
-    , ntraverse
+    , ntraverse, ntraverse_
     ) where
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
+import           Data.Foldable (traverse_)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Proxy (Proxy(..))
@@ -84,6 +85,26 @@ ntraverse onTypes onRecords onSums = \case
     TEmptyComposite -> pure TEmptyComposite
     TCompositeExtend n t (r :: ast ('CompositeT c)) ->
         TCompositeExtend n <$> onTypes t <*>
+        case compositeTagRefl :: CompositeTagEquality c of
+        IsRecordC -> onRecords r
+        IsSumC -> onSums r
+
+{-# INLINE ntraverse_ #-}
+ntraverse_ ::
+    Applicative f =>
+    (ast 'TypeT -> f ()) ->
+    (ast RecordT -> f ()) ->
+    (ast SumT -> f ()) ->
+    AST tag ast -> f ()
+ntraverse_ onTypes onRecords onSums = \case
+    TSkolem _ -> pure ()
+    TEmptyComposite -> pure ()
+    TFun a b -> onTypes a *> onTypes b
+    TInst _ params -> traverse_ onTypes params
+    TRecord r -> onRecords r
+    TSum s -> onSums s
+    TCompositeExtend _ t (r :: ast ('CompositeT c)) ->
+        onTypes t *>
         case compositeTagRefl :: CompositeTagEquality c of
         IsRecordC -> onRecords r
         IsSumC -> onSums r

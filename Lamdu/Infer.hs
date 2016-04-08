@@ -216,11 +216,26 @@ inferFromNom (Val.Nom n val) =
         -- with the params instead of creating metavars and unifying
         -- with them immediately after
         (nomTypeParams, innerTyp) <-
-            M.lookupNominal n
-            >>= InferNominal.instantiateFromNom n
-        TInst n nomTypeParams
-            & MetaTypeAST & unifyType valTyp
+            M.lookupNominal n >>= InferNominal.instantiateFromNom n
+        let tInstType = TInst n nomTypeParams & MetaTypeAST
+        unifyType tInstType valTyp
         inferRes (Val.BFromNom (Val.Nom n val')) innerTyp & return
+
+inferToNom :: Val.Nom V -> Infer s InferResult
+inferToNom (Val.Nom n val) =
+    do
+        (nomTypeParams, (innerBinders, innerTyp)) <-
+            M.lookupNominal n >>= InferNominal.instantiateToNom n
+        val' <-
+            do
+                (val', valTyp) <- infer val
+                unifyType innerTyp valTyp
+                return val'
+            & M.withSkolemScope innerBinders
+        TInst n nomTypeParams
+            & MetaTypeAST
+            & inferRes (Val.BToNom (Val.Nom n val'))
+            & return
 
 infer :: V -> Infer s InferResult
 infer (V v) =
@@ -233,6 +248,7 @@ infer (V v) =
     Val.BGetField x  -> inferGetField x
     Val.BInject x    -> inferInject x
     Val.BFromNom x   -> inferFromNom x
+    Val.BToNom x     -> inferToNom x
     Val.BCase x      -> inferCase x
 
 inferScheme :: Scope MetaType -> V -> Either M.Err (AV MetaType, Scheme 'TypeT)

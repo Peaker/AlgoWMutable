@@ -10,6 +10,7 @@ module Lamdu.Infer.Scope
     , newScope, emptyScope
     , insertLocal
     , lookupLocal, lookupGlobal, lookupSkolem, lookupNominal
+    , extendSkolemScope
     ) where
 
 import           Control.Lens.Operators
@@ -19,10 +20,11 @@ import           Lamdu.Expr.Identifier (NominalId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Nominal (Nominal)
-import           Lamdu.Expr.Type.Scheme (Scheme, schemeBindersLookup)
+import           Lamdu.Expr.Type.Scheme (Scheme, SchemeBinders, schemeBindersLookup)
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..))
 import qualified Lamdu.Expr.Val as Val
-import           Lamdu.Infer.Scope.Skolems (SkolemScope(..))
+import           Lamdu.Infer.Scope.Skolems (SkolemScope(..), SkolemScopeId)
+import qualified Lamdu.Infer.Scope.Skolems as Skolems
 import           Pretty.Map ()
 
 import           Prelude.Compat
@@ -64,3 +66,7 @@ insertLocal name typ (Scope skolems locals nominals globals) =
 
 skolemScope :: Scope t -> SkolemScope
 skolemScope = _scopeSkolems
+
+extendSkolemScope :: SkolemScopeId -> SchemeBinders -> Scope t -> Scope t
+extendSkolemScope freshId binders scope =
+    scope{_scopeSkolems = Skolems.new (_scopeSkolems scope) freshId binders}

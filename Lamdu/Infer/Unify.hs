@@ -11,6 +11,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
 module Lamdu.Infer.Unify
@@ -19,11 +20,13 @@ module Lamdu.Infer.Unify
 
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
-import           Control.Monad (unless, zipWithM_)
+import           Control.Monad (unless, zipWithM_, void)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Monoid as Monoid
 import           Data.RefZone (Ref)
+import qualified Data.RefZone.RefSet as RefSet
+import           Data.STRef
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Lamdu.Expr.Identifier (Tag, TParamId)
@@ -196,6 +199,30 @@ checkSkolemEscape skolemScope name =
             & schemeBindersLookup name
             & Lens.has Lens._Just
 
+checkSkolemsEscape ::
+    forall tag s. IsTag tag => SkolemScope -> AST tag MetaTypeAST -> M.Infer s ()
+checkSkolemsEscape skolemScope root =
+    do
+        visited <- newSTRef mempty & M.liftST
+        let go :: IsTag tag' => AST tag' MetaTypeAST -> M.Infer s ()
+            go (TSkolem name) =
+                checkSkolemEscape skolemScope name
+            go other = Type.ntraverse_ goM goM goM other & void
+            goM :: IsTag tag' => MetaTypeAST tag' -> M.Infer s ()
+            goM (MetaTypeVar var) =
+                M.repr var >>= \case
+                (ref, Bound ast) -> do
+                    oldVisited <-
+                        do
+                            oldVisited <- readSTRef visited
+                            writeSTRef visited (RefSet.insert ref oldVisited)
+                            return oldVisited
+                            & M.liftST
+                    unless (ref `RefSet.isMember` oldVisited) $ go ast
+                (_, Unbound {}) -> return ()
+            goM (MetaTypeAST ast) = go ast
+        go root
+
 typeActions :: UnifyActions 'TypeT s
 typeActions =
     UnifyActions
@@ -205,9 +232,7 @@ typeActions =
       -- "TypeConstraints" to show that no such verification is needed
       \_order (uRef, MetaVarInfo TypeConstraints uSkolemScope) (vLink, vAst) ->
       do
-          case vAst of
-              TSkolem vName -> checkSkolemEscape uSkolemScope vName
-              _ -> return ()
+          checkSkolemsEscape uSkolemScope vAst
           M.writeRef uRef vLink
     , actionUnifyUnbounds =
       \(uRef, uVarInfo) (vRef, vVarInfo) ->

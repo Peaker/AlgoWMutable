@@ -15,13 +15,18 @@ module Lamdu.Infer.Monad
     , Err(..), throwError
     , runInfer
     , repr
+    , liftST
+    , freshTVarName
     , freshRef, freshRefWith
     , readRef, writeRef
     , freshMetaVar
     , localScope
+    , withSkolemScope
     , lookupSkolem
     , lookupGlobal, lookupLocal, lookupNominal
-    , instantiate, instantiateBinders, generalize
+    , ReplaceSkolem, Unwrap
+    , instantiate, instantiateBinders
+    , generalize
     ) where
 
 import           Control.Lens (Lens')
@@ -45,7 +50,7 @@ import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Nominal (Nominal)
 import           Lamdu.Expr.Type.Pure (T(..))
-import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
+import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..), schemeBindersSingleton)
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), ASTTagEquality(..), IsTag(..)
     , CompositeTagEquality(..), RecordT, SumT )
@@ -54,6 +59,7 @@ import           Lamdu.Infer.Meta
     ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..), MetaVarInfo(..) )
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
+import           Lamdu.Infer.Scope.Skolems (SkolemScopeId(..))
 import           Pretty.Map ()
 import           Pretty.Utils (intercalate)
 import           Text.PrettyPrint (Doc, (<+>))
@@ -220,41 +226,52 @@ freshRef cs =
         skolemScope <- askScope <&> Scope.skolemScope
         MetaVarInfo cs skolemScope & freshRefWith
 
+withSkolemScope :: SchemeBinders -> Infer s a -> Infer s a
+withSkolemScope binders act =
+    do
+        freshId <- nextFresh <&> SkolemScopeId
+        localScope (Scope.extendSkolemScope freshId binders) act
+
 {-# INLINE freshMetaVar #-}
 freshMetaVar :: Constraints tag -> Infer s (MetaTypeAST tag)
 freshMetaVar cs = freshRef cs <&> MetaTypeVar
 
+type ReplaceSkolem m =
+    forall tag. IsTag tag => Constraints tag -> m (MetaTypeAST tag)
+
+type Unwrap m f =
+    forall tag. IsTag tag =>
+    ((Type.AST tag f -> m (MetaTypeAST tag)) ->
+     f tag -> m (MetaTypeAST tag))
+
 -- | Convert a Scheme's bound/quantified variables to meta-variables
 instantiateBinders ::
-    forall f s tag. IsTag tag =>
-    SchemeBinders -> f tag ->
-    (forall tag'. IsTag tag' =>
-     ((Type.AST tag' f -> Infer s (MetaTypeAST tag')) ->
-      f tag' -> Infer s (MetaTypeAST tag'))) ->
-    Infer s (MetaTypeAST tag)
-instantiateBinders (SchemeBinders typeVars recordVars sumVars) typ k =
+    forall m f tag. (Monad m, IsTag tag) =>
+    ReplaceSkolem m -> SchemeBinders -> f tag ->
+    Unwrap m f -> m (MetaTypeAST tag)
+instantiateBinders replaceSkolem (SchemeBinders typeVars recordVars sumVars) typ unwrap =
     {-# SCC "instantiate" #-}
     do
-        typeUFs <- {-# SCC "instantiate.freshtvs" #-}traverse freshMetaVar typeVars
-        recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse freshMetaVar recordVars
-        sumUFs <- {-# SCC "instantiate.freshstvs" #-}traverse freshMetaVar sumVars
-        let go :: IntMap (MetaTypeAST t) -> Type.AST t f -> Infer s (MetaTypeAST t)
+        typeUFs   <- {-# SCC "instantiate.freshtvs"  #-}traverse replaceSkolem typeVars
+        recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse replaceSkolem recordVars
+        sumUFs    <- {-# SCC "instantiate.freshstvs" #-}traverse replaceSkolem sumVars
+        let go :: IntMap (MetaTypeAST t) -> Type.AST t f -> m (MetaTypeAST t)
             go binders (Type.TSkolem (Type.TVarName i)) = return (binders IntMap.! i)
             go _ typeAST =
                 Type.ntraverse
-                (k (go typeUFs))
-                (k (go recordUFs))
-                (k (go sumUFs)) typeAST <&> MetaTypeAST
+                (unwrap (go typeUFs))
+                (unwrap (go recordUFs))
+                (unwrap (go sumUFs)) typeAST <&> MetaTypeAST
         let goTop =
                 case tagRefl :: ASTTagEquality tag of
                 IsTypeT -> go typeUFs
                 IsCompositeT IsRecordC -> go recordUFs
                 IsCompositeT IsSumC -> go sumUFs
-        k goTop typ
+        unwrap goTop typ
 
 -- | Convert a Scheme's bound/quantified variables to meta-variables
 instantiate :: IsTag tag => Scheme tag -> Infer s (MetaTypeAST tag)
-instantiate (Scheme binders typ) = instantiateBinders binders typ (. unT)
+instantiate (Scheme binders typ) = instantiateBinders freshMetaVar binders typ (. unT)
 
 repr :: MetaVar tag -> Infer s (MetaVar tag, Final tag)
 repr x =
@@ -272,15 +289,6 @@ repr x =
                         RefZone.writeRef zone ref (Link preFinal)
                         return (preFinal, final)
         liftST $ go x
-
-schemeBindersSingleton :: forall tag. IsTag tag => Type.TVarName tag -> Constraints tag -> SchemeBinders
-schemeBindersSingleton (Type.TVarName tvName) cs =
-    case tagRefl :: ASTTagEquality tag of
-    IsTypeT -> mempty { schemeTypeBinders = binders }
-    IsCompositeT IsRecordC -> mempty { schemeRecordBinders = binders }
-    IsCompositeT IsSumC -> mempty { schemeSumBinders = binders }
-    where
-        binders = IntMap.singleton tvName cs
 
 type DerefCache = (RefMap (T 'TypeT), RefMap (T RecordT), RefMap (T SumT))
 data DerefEnv s = DerefEnv
@@ -318,6 +326,9 @@ derefMemoize ref act =
                     derefCache ref ?~ res & modifySTRef cacheRef & liftST
                     return res
 
+freshTVarName :: Infer s (Type.TVarName tag)
+freshTVarName = nextFresh <&> Type.TVarName
+
 derefVar :: IsTag tag => MetaVar tag -> Deref s (T tag)
 derefVar var =
     do
@@ -329,7 +340,7 @@ derefVar var =
             Bound ast -> derefAST ast & localEnv (derefEnvVisited %~ RefSet.insert ref)
             Unbound info ->
                 do
-                    tvName <- nextFresh <&> Type.TVarName & derefInfer
+                    tvName <- derefInfer freshTVarName
                     askEnv
                         <&> derefEnvBinders
                         >>= liftST . flip modifySTRef

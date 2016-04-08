@@ -7,7 +7,8 @@
 {-# LANGUAGE DataKinds #-}
 module Lamdu.Expr.Type.Scheme
     ( TVarBinders
-    , SchemeBinders(..), schemeBindersLookup
+    , SchemeBinders(..)
+    , schemeBindersSingleton, schemeBindersLookup
     , Scheme(..), forAll
     ) where
 
@@ -109,6 +110,16 @@ forAll nTvs nRtvs nStvs mkType =
         tvNames = map Type.TVarName [1..nTvs]
         rtvNames = map Type.TVarName [nTvs+1..nTvs+nRtvs]
         stvNames = map Type.TVarName [nTvs+nRtvs+1..nTvs+nRtvs+nStvs]
+
+schemeBindersSingleton ::
+    forall tag. IsTag tag => Type.TVarName tag -> Constraints tag -> SchemeBinders
+schemeBindersSingleton (Type.TVarName tvName) cs =
+    case tagRefl :: ASTTagEquality tag of
+    IsTypeT -> mempty { schemeTypeBinders = binders }
+    IsCompositeT IsRecordC -> mempty { schemeRecordBinders = binders }
+    IsCompositeT IsSumC -> mempty { schemeSumBinders = binders }
+    where
+        binders = IntMap.singleton tvName cs
 
 schemeBindersLookup ::
     forall tag. IsTag tag =>

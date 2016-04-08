@@ -9,7 +9,7 @@ module Lamdu.Expr.Val.Pure
     , litInt, hole
     , ($$), ($$:), ($=), ($.), (.$), ($+), ($-)
     , recVal, var, infixApp
-    , fromNom
+    , fromNom, toNom
     ) where
 
 import Lamdu.Expr.Identifier (Tag(..), NominalId)
@@ -24,6 +24,9 @@ newtype V = V (Val V)
 
 fromNom :: NominalId -> V -> V
 fromNom nomId val = V $ BFromNom $ Nom nomId val
+
+toNom :: NominalId -> V -> V
+toNom nomId val = V $ BToNom $ Nom nomId val
 
 lam :: Var -> V -> V
 lam name body = V $ BLam $ Abs name body
