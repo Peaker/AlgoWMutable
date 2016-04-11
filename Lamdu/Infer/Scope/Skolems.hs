@@ -1,10 +1,11 @@
 -- | Hierarchial skolems' scope
-{-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE NoImplicitPrelude, GeneralizedNewtypeDeriving #-}
 module Lamdu.Infer.Scope.Skolems
     ( SkolemScopeId(..)
     , SkolemScope(..), new
     ) where
 
+import Control.DeepSeq (NFData(..))
 import Control.Lens.Operators
 import Data.Maybe (fromMaybe)
 import Lamdu.Expr.Type.Scheme (SchemeBinders)
@@ -14,7 +15,7 @@ import Text.PrettyPrint.HughesPJClass (Pretty(..))
 import Prelude.Compat
 
 newtype SkolemScopeId = SkolemScopeId Int
-   deriving (Eq, Ord, Show)
+   deriving (Eq, Ord, Show, NFData)
 instance Pretty SkolemScopeId where
     pPrint (SkolemScopeId i) = text "SkolemScope:" <> pPrint i
 
@@ -25,6 +26,8 @@ data SkolemScope = SkolemScope
    , -- lazily-built binders that mconcat the parents' chain
      skolemScopeBinders :: SchemeBinders
    }
+instance NFData SkolemScope where
+    rnf (SkolemScope a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
 instance Pretty SkolemScope where
     pPrint (SkolemScope _level scopeId _scopeParent _binders) =
         text "SkolemScope:" <> pPrint scopeId

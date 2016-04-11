@@ -13,6 +13,7 @@ module Lamdu.Infer.Scope
     , extendSkolemScope
     ) where
 
+import           Control.DeepSeq (NFData(..))
 import           Control.Lens.Operators
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -35,6 +36,8 @@ data Scope t = Scope
     , _scopeNominals :: Map NominalId Nominal
     , _scopeGlobals :: Map Val.Var (Scheme 'TypeT)
     }
+instance NFData t => NFData (Scope t) where
+    rnf (Scope a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
 
 newScope :: Map NominalId Nominal -> Map Val.Var (Scheme 'TypeT) -> Scope t
 newScope = Scope mempty mempty
