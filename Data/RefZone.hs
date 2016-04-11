@@ -54,9 +54,12 @@ freeze action =
 
 clone :: Frozen -> ST s (Zone s)
 clone (Frozen vector) =
-    Zone
-    <$> newSTRef (V.length vector)
-    <*> (V.thaw vector >>= newSTRef)
+    do
+        mvector <- MV.new (max (V.length vector) initialSize)
+        V.copy (MV.slice 0 len mvector) vector
+        Zone <$> newSTRef len <*> newSTRef mvector
+    where
+        len = V.length vector
 
 {-# INLINE incSize #-}
 incSize :: Zone s -> ST s (MV.STVector s Box, Int)
