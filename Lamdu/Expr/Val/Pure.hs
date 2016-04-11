@@ -12,49 +12,49 @@ module Lamdu.Expr.Val.Pure
     , fromNom, toNom
     ) where
 
-import Lamdu.Expr.Identifier (Tag(..), NominalId)
-import Lamdu.Expr.Val
-import Pretty.Map ()
-import Text.PrettyPrint.HughesPJClass (Pretty(..))
+import           Lamdu.Expr.Identifier (Tag(..), NominalId)
+import qualified Lamdu.Expr.Val as V
+import           Pretty.Map ()
+import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
-import Prelude.Compat
+import           Prelude.Compat
 
-newtype V = V (Val V)
+newtype V = V (V.Val V)
     deriving (Show, Pretty)
 
 fromNom :: NominalId -> V -> V
-fromNom nomId val = V $ BFromNom $ Nom nomId val
+fromNom nomId val = V $ V.BFromNom $ V.Nom nomId val
 
 toNom :: NominalId -> V -> V
-toNom nomId val = V $ BToNom $ Nom nomId val
+toNom nomId val = V $ V.BToNom $ V.Nom nomId val
 
-lam :: Var -> V -> V
-lam name body = V $ BLam $ Abs name body
+lam :: V.Var -> V -> V
+lam name body = V $ V.BLam $ V.Abs name body
 
-lambda :: Var -> (V -> V) -> V
+lambda :: V.Var -> (V -> V) -> V
 lambda name body = lam name $ body $ var name
 
-lambdaRecord :: Var -> [Tag] -> ([V] -> V) -> V
+lambdaRecord :: V.Var -> [Tag] -> ([V] -> V) -> V
 lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
 
 absurd :: V
-absurd = V $ BLeaf LAbsurd
+absurd = V $ V.BLeaf V.LAbsurd
 
 case_ :: Tag -> V -> V -> V
-case_ name handler restHandlers = V $ BCase $ Case name handler restHandlers
+case_ name handler restHandlers = V $ V.BCase $ V.Case name handler restHandlers
 
 cases :: [(Tag, V)] -> V
 cases = foldr (uncurry case_) absurd
 
 litInt :: Int -> V
-litInt = V . BLeaf . LInt
+litInt = V . V.BLeaf . V.LInt
 
 hole :: V
-hole = V $ BLeaf LHole
+hole = V $ V.BLeaf V.LHole
 
 infixl 4 $$
 ($$) :: V -> V -> V
-($$) f a = V $ BApp $ App f a
+($$) f a = V $ V.BApp $ V.App f a
 
 ($$:) :: V -> [(Tag, V)] -> V
 func $$: fields = func $$ recVal fields
@@ -62,22 +62,22 @@ func $$: fields = func $$ recVal fields
 recVal :: [(Tag, V)] -> V
 recVal = foldr extend empty
     where
-        extend (name, val) rest = V $ BRecExtend (RecExtend name val rest)
-        empty = V $ BLeaf LEmptyRecord
+        extend (name, val) rest = V $ V.BRecExtend (V.RecExtend name val rest)
+        empty = V $ V.BLeaf V.LEmptyRecord
 
 ($=) :: Tag -> V -> V -> V
-(x $= y) z = V $ BRecExtend $ RecExtend x y z
+(x $= y) z = V $ V.BRecExtend $ V.RecExtend x y z
 
 ($.) :: V -> Tag -> V
-x $. y = V $ BGetField $ GetField x y
+x $. y = V $ V.BGetField $ V.GetField x y
 
 (.$) :: Tag -> V -> V
-x .$ y = V $ BInject $ Inject x y
+x .$ y = V $ V.BInject $ V.Inject x y
 
-var :: Var -> V
-var = V . BLeaf . LVar
+var :: V.Var -> V
+var = V . V.BLeaf . V.LVar
 
-infixApp :: Var -> V -> V -> V
+infixApp :: V.Var -> V -> V -> V
 infixApp name x y = var name $$: [("l", x), ("r", y)]
 
 ($+) :: V -> V -> V

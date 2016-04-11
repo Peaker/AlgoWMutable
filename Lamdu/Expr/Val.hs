@@ -5,27 +5,33 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Lamdu.Expr.Val
     ( Val(..)
+      , _BLam, _BApp, _BRecExtend, _BCase, _BGetField
+      , _BInject, _BFromNom, _BToNom, _BLeaf
     , Leaf(..)
-    , Abs(..), Var(..)
-    , App(..)
-    , RecExtend(..)
-    , Case(..)
-    , GetField(..)
-    , Inject(..)
-    , Nom(..)
+      , _LVar, _LEmptyRecord, _LAbsurd, _LInt, _LHole
+    , Abs(..), lamParamId, lamResult
+    , Var(..), var
+    , App(..), applyFunc, applyArg
+    , RecExtend(..), recTag, recFieldVal, recRest
+    , Case(..), caseTag, caseMatch, caseMismatch
+    , GetField(..), getFieldTag, getFieldRecord
+    , Inject(..), injectTag, injectVal
+    , Nom(..), nomId, nomVal
     ) where
 
-import Control.DeepSeq (NFData(..))
-import Data.String (IsString)
-import Lamdu.Expr.Identifier (Identifier, Tag, NominalId)
-import Pretty.Map ()
-import Pretty.Utils ((<+?>))
-import Text.PrettyPrint (($+$), (<+>), (<>))
-import Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
+import           Control.DeepSeq (NFData(..))
+import qualified Control.Lens as Lens
+import           Data.String (IsString)
+import           Lamdu.Expr.Identifier (Identifier, Tag, NominalId)
+import           Pretty.Map ()
+import           Pretty.Utils ((<+?>))
+import           Text.PrettyPrint (($+$), (<+>), (<>))
+import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
-import Prelude.Compat
+import           Prelude.Compat
 
 data Leaf
     = LVar Var
@@ -51,32 +57,48 @@ instance Pretty Leaf where
 newtype Var = Var { _var :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
-data Abs v = Abs Var !v
-    deriving (Show, Functor, Foldable, Traversable)
+data Abs v = Abs
+    { _lamParamId :: Var
+    , _lamResult :: !v
+    } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Abs v) where rnf (Abs a b) = rnf a `seq` rnf b
 
-data App v = App !v !v
-    deriving (Show, Functor, Foldable, Traversable)
+data App v = App
+    { _applyFunc :: !v
+    , _applyArg :: !v
+    } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (App v) where rnf (App a b) = rnf a `seq` rnf b
 
-data RecExtend v = RecExtend Tag !v !v
-    deriving (Show, Functor, Foldable, Traversable)
+data RecExtend v = RecExtend
+    { _recTag :: Tag
+    , _recFieldVal :: !v
+    , _recRest :: !v
+    } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (RecExtend v) where rnf (RecExtend a b c) = rnf a `seq` rnf b `seq` rnf c
 
-data Case v = Case Tag !v !v
-    deriving (Show, Functor, Foldable, Traversable)
+data Case v = Case
+    { _caseTag :: Tag
+    , _caseMatch :: !v
+    , _caseMismatch :: !v
+    } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Case v) where rnf (Case a b c) = rnf a `seq` rnf b `seq` rnf c
 
-data GetField v = GetField !v Tag
-    deriving (Show, Functor, Foldable, Traversable)
+data GetField v = GetField
+    { _getFieldRecord :: !v
+    , _getFieldTag :: Tag
+    } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (GetField v) where rnf (GetField a b) = rnf a `seq` rnf b
 
-data Inject v = Inject Tag !v
-    deriving (Show, Functor, Foldable, Traversable)
+data Inject v = Inject
+    { _injectTag :: Tag
+    , _injectVal :: !v
+    } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Inject v) where rnf (Inject a b) = rnf a `seq` rnf b
 
-data Nom v = Nom NominalId !v
-    deriving (Show, Functor, Foldable, Traversable)
+data Nom v = Nom
+    { _nomId :: NominalId
+    , _nomVal :: !v
+    } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Nom v) where rnf (Nom a b) = rnf a `seq` rnf b
 
 data Val v
@@ -133,3 +155,13 @@ instance Pretty v => Pretty (Val v) where
         pPrintPrec level 5 val <> "»" <> pPrint tId
     pPrintPrec level prec (BLeaf leaf) = pPrintPrec level prec leaf
 
+Lens.makeLenses ''Var
+Lens.makeLenses ''Abs
+Lens.makeLenses ''Inject
+Lens.makeLenses ''GetField
+Lens.makeLenses ''App
+Lens.makeLenses ''Nom
+Lens.makeLenses ''RecExtend
+Lens.makeLenses ''Case
+Lens.makePrisms ''Leaf
+Lens.makePrisms ''Val
