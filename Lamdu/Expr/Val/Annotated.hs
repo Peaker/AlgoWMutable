@@ -36,6 +36,8 @@ data AV a = AV
 instance Pretty a => Pretty (AV a) where
     pPrintPrec level prec (AV ann v)
         | isEmpty annDoc = pPrintPrec level prec v
+        | -- HACK:
+          pPrint () == annDoc = pPrintPrec level prec v
         | otherwise =
         "PL{" <> annDoc <> "}" <>
         pPrintPrec level 10 v
