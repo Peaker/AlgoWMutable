@@ -5,9 +5,11 @@
 {-# LANGUAGE LambdaCase #-}
 module Lamdu.Infer
     ( Infer, infer, inferScheme
+    , unifyType
     , Scope, RefZone.Frozen
     , M.Context, M.emptyContext
     , M.runInfer
+    , M.Err(..)
 
     , MetaType, M.generalize, M.deref, M.runDeref
     ) where
@@ -34,7 +36,7 @@ import qualified Lamdu.Infer.Monad as M
 import qualified Lamdu.Infer.Nominal as InferNominal
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
-import           Lamdu.Infer.Unify
+import           Lamdu.Infer.Unify (unifyType, unifyTypeVar)
 import           Pretty.Map ()
 import           Text.PrettyPrint ((<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
