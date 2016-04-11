@@ -6,7 +6,6 @@ import           Criterion.Main (bench, defaultMain)
 import           Lamdu.Expr.Val.Annotated (AV(..))
 import qualified Lamdu.Infer as Infer
 import qualified TestVals
-import           Text.PrettyPrint ((<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
@@ -14,12 +13,9 @@ import           Prelude.Compat
 benchInfer :: AV () -> Benchmarkable
 benchInfer =
     nf $ \e ->
-    let res =
-            Infer.runInfer TestVals.env (Infer.inferScheme e)
-            & (`evalStateT` Infer.emptyContext)
-    in case res of
-    Left err -> error $ show $ "error:" <+> pPrint err
-    Right (eTyped, _zone) -> eTyped -- $ rnf $ eTyped ^.. folded . _1 . plType
+    Infer.runInfer TestVals.env (Infer.inferScheme e)
+    & (`evalStateT` Infer.emptyContext)
+    & either (error . show . pPrint) id
 
 benches :: [(String, Benchmarkable)]
 benches =
