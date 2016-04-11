@@ -110,7 +110,7 @@ instance Pretty Err where
 data Env s = Env
     { envFresh :: STRef s Int
     , envZone :: Zone s
-    , envScope :: Scope MetaType
+    , envScope :: Scope
     }
 
 newtype InferEnv env s a = Infer
@@ -148,7 +148,7 @@ emptyContext :: Context
 emptyContext = Context 0 RefZone.emptyFrozen
 
 runInfer ::
-    Scope MetaType -> (forall s. Infer s a) ->
+    Scope -> (forall s. Infer s a) ->
     StateT Context (Either Err) a
 runInfer scope act =
     StateT $ \(Context freshNum frozen) ->
@@ -203,12 +203,12 @@ writeRef ref val =
 
 {-# INLINE localScope #-}
 localScope ::
-    (Scope MetaType -> Scope MetaType) ->
+    (Scope -> Scope) ->
     Infer s a -> Infer s a
 localScope f = localEnv $ \e -> e { envScope = f (envScope e) }
 
 {-# INLINE askScope #-}
-askScope :: Infer s (Scope MetaType)
+askScope :: Infer s Scope
 askScope = askEnv <&> envScope
 
 {-# INLINE lookupNominal #-}

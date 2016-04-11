@@ -221,7 +221,7 @@ closedStOf = T.tInst "ClosedST" . Map.singleton "elem"
 infixArgs :: V -> V -> V
 infixArgs l r = V.recVal [("l", l), ("r", r)]
 
-env :: Scope a
+env :: Scope
 env = Scope.newScope nominals globals
     where
         nominals =
