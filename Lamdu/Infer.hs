@@ -55,7 +55,6 @@ data Payload = Payload
 
 Lens.makeLenses ''Payload
 
-type InferResult a = (AV (Payload, a), MetaType)
 type InferAction s a = Infer s (Val (AV (Payload, a)), MetaType)
 
 int :: Type ast
@@ -255,7 +254,7 @@ inferToNom (Val.Nom n val) =
                 & MetaTypeAST
         return (Val.BToNom (Val.Nom n val'), typ)
 
-infer :: AV a -> Infer s (InferResult a)
+infer :: AV a -> Infer s (AV (Payload, a), MetaType)
 infer (AV pl val) =
     {-# SCC "infer" #-}
     case val of
