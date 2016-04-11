@@ -36,26 +36,29 @@ resumeTest val injectPos injectVal =
     {-# SCC "resumeTest" #-}
     case res of
     Left err -> pPrint val <+?> "causes type error:" <+> pPrint err
-    Right ((av, scheme), newContext) ->
+    Right ((av, scheme), context) ->
         vcat
         [ pPrint val <+?> " :: " <+> pPrint scheme $+$ pPrint (av <&> snd)
-        , let eInjectedTyp = Lens._Right %~ fst $ runInfer newContext $ inject av
-          in  pPrint eInjectedTyp
+        , inject context av & Lens._Right %~ fst & pPrint
         ]
     where
         runInfer ::
-            Infer.Context -> (forall s. Infer s a) ->
+            Infer.Context -> Infer.Scope -> (forall s. Infer s a) ->
             Either Infer.Err (a, Infer.Context)
-        runInfer ctx act = runStateT (Infer.runInfer Vals.env act) ctx
-        inject :: AV (Infer.Payload, T 'TypeT) -> Infer s (T 'TypeT)
-        inject av =
+        runInfer ctx scope act = runStateT (Infer.runInfer scope act) ctx
+        inject ::
+            Infer.Context -> AV (Infer.Payload, T 'TypeT) ->
+            Either Infer.Err (T 'TypeT, Infer.Context)
+        inject ctx av =
+            runInfer ctx (ann ^. Infer.plScope) $
             do
                 injectTyp <- Infer.infer injectVal <&> snd
-                Infer.unifyType injectTyp $
-                    av ^# Lens.cloneLens injectPos . AV.annotation . _1 . Infer.plType
+                Infer.unifyType injectTyp $ ann ^. Infer.plType
                 Infer.runDeref $ Infer.deref injectTyp
+            where
+                ann = av ^# Lens.cloneLens injectPos . AV.annotation . _1
         res =
-            runInfer Infer.emptyContext $
+            runInfer Infer.emptyContext Vals.env $
             Infer.infer val
             <&> _1 . Lens.mapped %~ fst
             >>= _2 Infer.generalize
