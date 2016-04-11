@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
@@ -7,6 +8,7 @@
 module Lamdu.Infer
     ( Infer, infer, inferScheme
     , unifyType
+    , Payload(..), plType, plScope
     , Scope, RefZone.Frozen
     , M.Context, M.emptyContext
     , M.runInfer
@@ -15,13 +17,17 @@ module Lamdu.Infer
     , MetaType, M.generalize, M.deref, M.runDeref
     ) where
 
+import           Control.DeepSeq (NFData(..))
+import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Control.Monad (unless)
 import qualified Data.Map as Map
 import qualified Data.RefZone as RefZone
 import qualified Data.Set as Set
+import           Data.Typeable (Typeable)
 import           GHC.Exts (inline)
+import           GHC.Generics (Generic)
 import           Lamdu.Expr.Identifier (Tag)
 import           Lamdu.Expr.Type (Type, AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
@@ -43,8 +49,16 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-type InferResult a = (AV (MetaType, a), MetaType)
-type InferAction s a = Infer s (Val (AV (MetaType, a)), MetaType)
+data Payload = Payload
+    { _plType :: MetaType
+    , _plScope :: Scope
+    } deriving (Generic, Typeable)
+instance NFData Payload where rnf (Payload a b) = rnf a `seq` rnf b
+
+Lens.makeLenses ''Payload
+
+type InferResult a = (AV (Payload, a), MetaType)
+type InferAction s a = Infer s (Val (AV (Payload, a)), MetaType)
 
 int :: Type ast
 int = TInst "Int" Map.empty
@@ -256,9 +270,14 @@ infer (AV pl val) =
     Val.BFromNom x   -> inferFromNom x
     Val.BToNom x     -> inferToNom x
     Val.BCase x      -> inferCase x
-    <&> \(val', typ) -> (AV (typ, pl) val', typ)
+    >>= annotate
+    where
+        annotate (val', typ) =
+            do
+                scope <- M.askEnv <&> M.envScope
+                return (AV (Payload typ scope, pl) val', typ)
 
-inferScheme :: AV a -> M.Infer s (AV (MetaType, a), Scheme 'TypeT)
+inferScheme :: AV a -> M.Infer s (AV (Payload, a), Scheme 'TypeT)
 inferScheme x =
     {-# SCC "inferScheme" #-}
     infer x >>= inline _2 M.generalize

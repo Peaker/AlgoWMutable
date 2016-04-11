@@ -19,7 +19,7 @@ import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Lamdu.Expr.Val.Annotated as AV
-import           Lamdu.Infer (Infer, MetaType)
+import           Lamdu.Infer (Infer)
 import qualified Lamdu.Infer as Infer
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
@@ -29,7 +29,7 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-type InjectPos = ALens' (AV (MetaType, T 'TypeT)) (AV (MetaType, T 'TypeT))
+type InjectPos = ALens' (AV (Infer.Payload, T 'TypeT)) (AV (Infer.Payload, T 'TypeT))
 
 resumeTest :: AV () -> InjectPos -> AV () -> Doc
 resumeTest val injectPos injectVal =
@@ -47,11 +47,12 @@ resumeTest val injectPos injectVal =
             Infer.Context -> (forall s. Infer s a) ->
             Either Infer.Err (a, Infer.Context)
         runInfer ctx act = runStateT (Infer.runInfer Vals.env act) ctx
-        inject :: AV (MetaType, T 'TypeT) -> Infer s (T 'TypeT)
+        inject :: AV (Infer.Payload, T 'TypeT) -> Infer s (T 'TypeT)
         inject av =
             do
                 injectTyp <- Infer.infer injectVal <&> snd
-                Infer.unifyType injectTyp $ av ^# Lens.cloneLens injectPos . AV.annotation . _1
+                Infer.unifyType injectTyp $
+                    av ^# Lens.cloneLens injectPos . AV.annotation . _1 . Infer.plType
                 Infer.runDeref $ Infer.deref injectTyp
         res =
             runInfer Infer.emptyContext $
@@ -60,7 +61,7 @@ resumeTest val injectPos injectVal =
             >>= _2 Infer.generalize
             >>= Infer.runDeref . (_1 . traverse) derefDup
             where
-                derefDup x = Infer.deref x <&> (,) x
+                derefDup pl = Infer.deref (pl ^. Infer.plType) <&> (,) pl
 
 test :: AV () -> Doc
 test x =
@@ -75,7 +76,7 @@ test x =
             Infer.runInfer Vals.env $
             Infer.infer x
             >>= _2 Infer.generalize
-            >>= Infer.runDeref . (_1 . traverse) (Infer.deref . fst)
+            >>= Infer.runDeref . (_1 . traverse) (Infer.deref . (^. Infer.plType) . fst)
 
 tests :: [AV ()]
 tests =

@@ -12,7 +12,7 @@
 {-# LANGUAGE RankNTypes #-}
 module Lamdu.Infer.Monad
     ( InferEnv
-    , Env, localEnv, askEnv
+    , Env, localEnv, askEnv, envScope
     , Infer
     , Err(..), throwError
     , Context, emptyContext
