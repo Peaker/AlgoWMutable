@@ -27,13 +27,14 @@ import qualified Lamdu.Expr.Type.Pure as T
 import qualified Lamdu.Expr.Type.Scheme as Scheme
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
 import qualified Lamdu.Expr.Val as Val
-import           Lamdu.Expr.Val.Pure (V, ($$), ($$:))
-import qualified Lamdu.Expr.Val.Pure as V
+import           Lamdu.Expr.Val.Annotated (AV, ($$), ($$:))
+import qualified Lamdu.Expr.Val.Annotated as V
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
 
 import           Prelude.Compat
 
+type V = AV ()
 type TType = T 'TypeT
 
 infixType :: T 'TypeT -> T 'TypeT -> T 'TypeT -> T 'TypeT

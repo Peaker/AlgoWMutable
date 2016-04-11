@@ -9,11 +9,20 @@ module Lamdu.Expr.Val.Annotated
     ( AV(..)
     , annotation
     , val
+
+    , lam, lambda, lambdaRecord
+    , absurd, case_, cases
+    , litInt, hole
+    , ($$), ($$:), ($=), ($.), (.$), ($+), ($-)
+    , recVal, var, infixApp
+    , fromNom, toNom
     ) where
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
+import           Lamdu.Expr.Identifier (Tag(..), NominalId)
 import           Lamdu.Expr.Val (Val(..))
+import qualified Lamdu.Expr.Val as V
 import           Pretty.Map ()
 import           Text.PrettyPrint (isEmpty, (<>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
@@ -36,3 +45,68 @@ instance NFData a => NFData (AV a) where
     rnf (AV ann val) = rnf ann `seq` rnf val
 
 Lens.makeLenses ''AV
+
+
+fromNom :: Monoid a => NominalId -> AV a -> AV a
+fromNom nomId = AV mempty . V.BFromNom . V.Nom nomId
+
+toNom :: Monoid a => NominalId -> AV a -> AV a
+toNom nomId = AV mempty . V.BToNom . V.Nom nomId
+
+lam :: Monoid a => V.Var -> AV a -> AV a
+lam name body = AV mempty $ V.BLam $ V.Abs name body
+
+lambda :: Monoid a => V.Var -> (AV a -> AV a) -> AV a
+lambda name body = lam name $ body $ var name
+
+lambdaRecord :: Monoid a => V.Var -> [Tag] -> ([AV a] -> AV a) -> AV a
+lambdaRecord name fields body = lambda name $ \v -> body $ map (v $.) fields
+
+absurd :: Monoid a => AV a
+absurd = AV mempty $ V.BLeaf V.LAbsurd
+
+case_ :: Monoid a => Tag -> AV a -> AV a -> AV a
+case_ name handler restHandlers = AV mempty $ V.BCase $ V.Case name handler restHandlers
+
+cases :: Monoid a => [(Tag, AV a)] -> AV a
+cases = foldr (uncurry case_) absurd
+
+litInt :: Monoid a => Int -> AV a
+litInt = AV mempty . V.BLeaf . V.LInt
+
+hole :: Monoid a => AV a
+hole = AV mempty $ V.BLeaf V.LHole
+
+infixl 4 $$
+($$) :: Monoid a => AV a -> AV a -> AV a
+($$) f a = AV mempty $ V.BApp $ V.App f a
+
+($$:) :: Monoid a => AV a -> [(Tag, AV a)] -> AV a
+func $$: fields = func $$ recVal fields
+
+recVal :: Monoid a => [(Tag, AV a)] -> AV a
+recVal = foldr extend empty
+    where
+        extend (name, v) = AV mempty . V.BRecExtend . V.RecExtend name v
+        empty = AV mempty $ V.BLeaf V.LEmptyRecord
+
+($=) :: Monoid a => Tag -> AV a -> AV a -> AV a
+(x $= y) z = AV mempty $ V.BRecExtend $ V.RecExtend x y z
+
+($.) :: Monoid a => AV a -> Tag -> AV a
+x $. y = AV mempty $ V.BGetField $ V.GetField x y
+
+(.$) :: Monoid a => Tag -> AV a -> AV a
+x .$ y = AV mempty $ V.BInject $ V.Inject x y
+
+var :: Monoid a => V.Var -> AV a
+var = AV mempty . V.BLeaf . V.LVar
+
+infixApp :: Monoid a => V.Var -> AV a -> AV a -> AV a
+infixApp name x y = var name $$: [("l", x), ("r", y)]
+
+($+) :: Monoid a => AV a -> AV a -> AV a
+($+) = infixApp "+"
+
+($-) :: Monoid a => AV a -> AV a -> AV a
+($-) = infixApp "-"

@@ -29,7 +29,6 @@ import           Lamdu.Expr.Type.Tag (IsCompositeTag(..), ASTTag(..))
 import           Lamdu.Expr.Val (Val(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..))
-import           Lamdu.Expr.Val.Pure (V(..))
 import           Lamdu.Infer.Meta
 import           Lamdu.Infer.Monad (Infer)
 import qualified Lamdu.Infer.Monad as M
@@ -43,15 +42,13 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-type InferResult = (AV MetaType, MetaType)
+type InferResult a = (AV (MetaType, a), MetaType)
+type InferAction s a = Infer s (Val (AV (MetaType, a)), MetaType)
 
 int :: Type ast
 int = TInst "Int" Map.empty
 
-inferRes :: Val (AV MetaType) -> MetaType -> (AV MetaType, MetaType)
-inferRes val typ = (AV typ val, typ)
-
-inferLeaf :: Val.Leaf -> Infer s InferResult
+inferLeaf :: Val.Leaf -> InferAction s a
 inferLeaf leaf =
     {-# SCC "inferLeaf" #-}
     case leaf of
@@ -79,18 +76,17 @@ inferLeaf leaf =
             M.lookupGlobal n >>= \case
             Just scheme -> M.instantiate scheme
             Nothing -> M.throwError $ M.VarNotInScope n
-    <&> inferRes (Val.BLeaf leaf)
+    <&> (,) (Val.BLeaf leaf)
 
-inferLam :: Val.Abs V -> Infer s InferResult
+inferLam :: Val.Abs (AV a) -> InferAction s a
 inferLam (Val.Abs n body) =
     {-# SCC "inferLam" #-}
     do
         nType <- M.freshMetaVar TypeConstraints
         (body', resType) <- infer body & M.localScope (Scope.insertLocal n nType)
-        TFun nType resType & MetaTypeAST
-            & inferRes (Val.BLam (Val.Abs n body')) & return
+        return (Val.BLam (Val.Abs n body'), TFun nType resType & MetaTypeAST)
 
-inferApp :: Val.App V -> Infer s InferResult
+inferApp :: Val.App (AV a) -> InferAction s a
 inferApp (Val.App fun arg) =
     {-# SCC "inferApp" #-}
     do
@@ -110,9 +106,9 @@ inferApp (Val.App fun arg) =
                     return resTyp
             MetaTypeAST t ->
                 M.DoesNotUnify (pPrint t) "Function type" & M.throwError
-        inferRes (Val.BApp (Val.App fun' arg')) resTyp & return
+        return (Val.BApp (Val.App fun' arg'), resTyp)
 
-inferRecExtend :: Val.RecExtend V -> Infer s InferResult
+inferRecExtend :: Val.RecExtend (AV a) -> InferAction s a
 inferRecExtend (Val.RecExtend name val rest) =
     {-# SCC "inferRecExtend" #-}
     do
@@ -134,11 +130,11 @@ inferRecExtend (Val.RecExtend name val rest) =
             MetaTypeAST t ->
                 M.DoesNotUnify (pPrint t) "Record type" & M.throwError
         (val', valTyp) <- infer val
-        TCompositeExtend name valTyp restRecordTyp
-            & MetaTypeAST
-            & TRecord & MetaTypeAST
-            & inferRes (Val.BRecExtend (Val.RecExtend name val' rest'))
-            & return
+        let typ =
+                TCompositeExtend name valTyp restRecordTyp
+                & MetaTypeAST
+                & TRecord & MetaTypeAST
+        return (Val.BRecExtend (Val.RecExtend name val' rest'), typ)
     where
 
 propagateConstraint :: IsCompositeTag c => Tag -> MetaComposite c -> Infer s ()
@@ -165,7 +161,7 @@ propagateConstraint tagName =
             | fieldTag == tagName = M.DuplicateFields [tagName] & M.throwError
             | otherwise = propagateConstraint tagName restTyp
 
-inferCase :: Val.Case V -> Infer s InferResult
+inferCase :: Val.Case (AV a) -> InferAction s a
 inferCase (Val.Case name handler restHandler) =
     {-# SCC "inferCase" #-}
     do
@@ -185,12 +181,12 @@ inferCase (Val.Case name handler restHandler) =
         let expectedRestHandlerType = TSum sumTail & MetaTypeAST & toResType
         unifyType expectedRestHandlerType restHandlerTyp
 
-        TCompositeExtend name fieldType sumTail
-            & MetaTypeAST & TSum & MetaTypeAST & toResType
-            & inferRes (Val.BCase (Val.Case name handler' restHandler'))
-            & return
+        let typ =
+                TCompositeExtend name fieldType sumTail
+                & MetaTypeAST & TSum & MetaTypeAST & toResType
+        return (Val.BCase (Val.Case name handler' restHandler'), typ)
 
-inferGetField :: Val.GetField V -> Infer s InferResult
+inferGetField :: Val.GetField (AV a) -> InferAction s a
 inferGetField (Val.GetField val name) =
     {-# SCC "inferGetField" #-}
     do
@@ -202,20 +198,21 @@ inferGetField (Val.GetField val name) =
             <&> MetaTypeAST
             <&> TRecord <&> MetaTypeAST
         unifyType expectedValTyp valTyp
-        inferRes (Val.BGetField (Val.GetField val' name)) resTyp & return
+        return (Val.BGetField (Val.GetField val' name), resTyp)
 
-inferInject :: Val.Inject V -> Infer s InferResult
+inferInject :: Val.Inject (AV a) -> InferAction s a
 inferInject (Val.Inject name val) =
     {-# SCC "inferInject" #-}
     do
         (val', valTyp) <- infer val
-        M.freshMetaVar (CompositeConstraints (Set.singleton name))
+        typ <-
+            M.freshMetaVar (CompositeConstraints (Set.singleton name))
             <&> TCompositeExtend name valTyp
             <&> MetaTypeAST
             <&> TSum <&> MetaTypeAST
-            <&> inferRes (Val.BInject (Val.Inject name val'))
+        return (Val.BInject (Val.Inject name val'), typ)
 
-inferFromNom :: Val.Nom V -> Infer s InferResult
+inferFromNom :: Val.Nom (AV a) -> InferAction s a
 inferFromNom (Val.Nom n val) =
     do
         (val', valTyp) <- infer val
@@ -227,9 +224,9 @@ inferFromNom (Val.Nom n val) =
             M.lookupNominal n >>= InferNominal.instantiateFromNom n
         let tInstType = TInst n nomTypeParams & MetaTypeAST
         unifyType tInstType valTyp
-        inferRes (Val.BFromNom (Val.Nom n val')) innerTyp & return
+        return (Val.BFromNom (Val.Nom n val'), innerTyp)
 
-inferToNom :: Val.Nom V -> Infer s InferResult
+inferToNom :: Val.Nom (AV a) -> InferAction s a
 inferToNom (Val.Nom n val) =
     do
         (nomTypeParams, (innerBinders, innerTyp)) <-
@@ -240,15 +237,15 @@ inferToNom (Val.Nom n val) =
                 unifyType innerTyp valTyp
                 return val'
             & M.withSkolemScope innerBinders
-        TInst n nomTypeParams
-            & MetaTypeAST
-            & inferRes (Val.BToNom (Val.Nom n val'))
-            & return
+        let typ =
+                TInst n nomTypeParams
+                & MetaTypeAST
+        return (Val.BToNom (Val.Nom n val'), typ)
 
-infer :: V -> Infer s InferResult
-infer (V v) =
+infer :: AV a -> Infer s (InferResult a)
+infer (AV pl val) =
     {-# SCC "infer" #-}
-    case v of
+    case val of
     Val.BLeaf x      -> inferLeaf x
     Val.BLam x       -> inferLam x
     Val.BApp x       -> inferApp x
@@ -258,8 +255,9 @@ infer (V v) =
     Val.BFromNom x   -> inferFromNom x
     Val.BToNom x     -> inferToNom x
     Val.BCase x      -> inferCase x
+    <&> \(val', typ) -> (AV (typ, pl) val', typ)
 
-inferScheme :: V -> M.Infer s (AV MetaType, Scheme 'TypeT)
+inferScheme :: AV a -> M.Infer s (AV (MetaType, a), Scheme 'TypeT)
 inferScheme x =
     {-# SCC "inferScheme" #-}
     infer x >>= inline _2 M.generalize

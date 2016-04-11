@@ -3,7 +3,7 @@ import           Control.Monad.State.Strict (evalStateT)
 import           Control.Lens.Operators
 import           Criterion (Benchmarkable, nf)
 import           Criterion.Main (bench, defaultMain)
-import           Lamdu.Expr.Val.Pure (V(..))
+import           Lamdu.Expr.Val.Annotated (AV(..))
 import qualified Lamdu.Infer as Infer
 import qualified TestVals
 import           Text.PrettyPrint ((<+>))
@@ -11,7 +11,7 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-benchInfer :: V -> Benchmarkable
+benchInfer :: AV () -> Benchmarkable
 benchInfer =
     nf $ \e ->
     let res =

@@ -17,10 +17,8 @@ import           Control.Monad.State.Strict (StateT(..), evalStateT)
 import           Lamdu.Expr.Type.Pure (T)
 import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import qualified Lamdu.Expr.Val as Val
-import           Lamdu.Expr.Val.Annotated (AV)
+import           Lamdu.Expr.Val.Annotated (AV(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Lamdu.Expr.Val.Annotated as AV
-import           Lamdu.Expr.Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
-import qualified Lamdu.Expr.Val.Pure as V
 import           Lamdu.Infer (Infer, MetaType)
 import qualified Lamdu.Infer as Infer
 import           Pretty.Map ()
@@ -33,7 +31,7 @@ import           Prelude.Compat
 
 type InjectPos = ALens' (AV (MetaType, T 'TypeT)) (AV (MetaType, T 'TypeT))
 
-resumeTest :: V -> InjectPos -> V -> Doc
+resumeTest :: AV () -> InjectPos -> AV () -> Doc
 resumeTest val injectPos injectVal =
     {-# SCC "resumeTest" #-}
     case res of
@@ -58,12 +56,13 @@ resumeTest val injectPos injectVal =
         res =
             runInfer Infer.emptyContext $
             Infer.infer val
+            <&> _1 . Lens.mapped %~ fst
             >>= _2 Infer.generalize
-            >>= Infer.runDeref . _1 (traverse derefDup)
+            >>= Infer.runDeref . (_1 . traverse) derefDup
             where
                 derefDup x = Infer.deref x <&> (,) x
 
-test :: V -> Doc
+test :: AV () -> Doc
 test x =
     {-# SCC "test" #-}
     pPrint x <+?>
@@ -76,52 +75,52 @@ test x =
             Infer.runInfer Vals.env $
             Infer.infer x
             >>= _2 Infer.generalize
-            >>= Infer.runDeref . _1 (traverse Infer.deref)
+            >>= Infer.runDeref . (_1 . traverse) (Infer.deref . fst)
 
-tests :: [V]
+tests :: [AV ()]
 tests =
-    [ V.lam "x" $ V.lam "y" $ V.var "x" $$ V.var "y" $$ V.var "y"
-    , V.lam "x" $ V.recVal [] & "x" $= V.var "x" & "y" $= V.lambda "x" id
-    , V.lam "x" $ (V.var "x" $. "y") $$ V.lambda "a" id
-    , V.lam "x" $ V.var "x" $$ V.var "x"
-    , V.lam "x" $ (V.var "x" $. "y") $$ (V.var "x" $. "y")
-    , V.recVal [("x", V.recVal []), ("y", V.recVal [])]
-    , V.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
-    , V.lambda "g" $ \g ->
-      V.lambda "f" $ \f ->
-      V.lambda "x" $ \x ->
+    [ AV.lam "x" $ AV.lam "y" $ AV.var "x" $$ AV.var "y" $$ AV.var "y"
+    , AV.lam "x" $ AV.recVal [] & "x" $= AV.var "x" & "y" $= AV.lambda "x" id
+    , AV.lam "x" $ (AV.var "x" $. "y") $$ AV.lambda "a" id
+    , AV.lam "x" $ AV.var "x" $$ AV.var "x"
+    , AV.lam "x" $ (AV.var "x" $. "y") $$ (AV.var "x" $. "y")
+    , AV.recVal [("x", AV.recVal []), ("y", AV.recVal [])]
+    , AV.lambdaRecord "params" ["x", "y", "z"] $ \[x, y, z] -> x $+ y $- z
+    , AV.lambda "g" $ \g ->
+      AV.lambda "f" $ \f ->
+      AV.lambda "x" $ \x ->
       g $$ (f $$ "Just" .$ x)
-        $$ (f $$ "Nothing" .$ V.recVal [])
-    , V.cases
-      [ ("Nothing", V.lam "_" (V.litInt 0))
-      , ("Just", V.lambda "x" $ \x -> V.litInt 1 $+ x)
+        $$ (f $$ "Nothing" .$ AV.recVal [])
+    , AV.cases
+      [ ("Nothing", AV.lam "_" (AV.litInt 0))
+      , ("Just", AV.lambda "x" $ \x -> AV.litInt 1 $+ x)
       ]
-    , V.lambda "f" $ \f ->
-      V.lambda "x" $ \x ->
+    , AV.lambda "f" $ \f ->
+      AV.lambda "x" $ \x ->
       (x $. "a")
       $$ (f $$ x)
-      $$ (f $$ V.recVal [("a", V.hole)])
-    , V.lambda "f" $ \f ->
-      V.lambda "x" $ \x ->
+      $$ (f $$ AV.recVal [("a", AV.hole)])
+    , AV.lambda "f" $ \f ->
+      AV.lambda "x" $ \x ->
       f $$ (x $. "a") $$ x
-    , V.fromNom (fst Vals.listTypePair) $ V.lambda "x" $ \x -> x
-    , V.fromNom (fst Vals.listTypePair) V.hole
-    , V.fromNom (fst Vals.stTypePair) V.hole
-    , V.var "runST" $$ V.hole
-    , V.fromNom (fst Vals.closedStTypePair) V.hole
-    , V.toNom (fst Vals.closedStTypePair) V.hole
-    , V.toNom (fst Vals.closedStTypePair) (V.litInt 1)
-    , V.lambda "x" $ V.toNom (fst Vals.closedStTypePair)
+    , AV.fromNom (fst Vals.listTypePair) $ AV.lambda "x" $ \x -> x
+    , AV.fromNom (fst Vals.listTypePair) AV.hole
+    , AV.fromNom (fst Vals.stTypePair) AV.hole
+    , AV.var "runST" $$ AV.hole
+    , AV.fromNom (fst Vals.closedStTypePair) AV.hole
+    , AV.toNom (fst Vals.closedStTypePair) AV.hole
+    , AV.toNom (fst Vals.closedStTypePair) (AV.litInt 1)
+    , AV.lambda "x" $ AV.toNom (fst Vals.closedStTypePair)
     ]
 
 testsDoc :: Doc
 testsDoc = vcat $ map test tests
 
-resumeTests :: [(V, InjectPos, V)]
+resumeTests :: [(AV (), InjectPos, AV ())]
 resumeTests =
-    [ ( V.lam "x" V.hole
+    [ ( AV.lam "x" AV.hole
       , AV.val . Val._BLam . Val.lamResult & Lens.unsafeSingular
-      , V.var "x"
+      , AV.var "x"
       )
     ]
 
