@@ -1,4 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
@@ -13,6 +15,7 @@ module Lamdu.Infer.Monad
     , Env, localEnv, askEnv
     , Infer
     , Err(..), throwError
+    , Context, emptyContext
     , runInfer
     , repr
     , liftST
@@ -26,7 +29,7 @@ module Lamdu.Infer.Monad
     , lookupGlobal, lookupLocal, lookupNominal
     , ReplaceSkolem, Unwrap
     , instantiate, instantiateBinders
-    , generalize
+    , generalize, deref, runDeref
     ) where
 
 import           Control.Lens (Lens')
@@ -34,7 +37,8 @@ import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Control.Monad (when)
-import           Control.Monad.ST (ST, runST)
+import           Control.Monad.ST (ST)
+import           Control.Monad.Trans.State.Strict (StateT(..))
 import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import           Data.Monoid ((<>))
@@ -132,13 +136,35 @@ instance Monad (InferEnv env s) where
         Left err -> pure (Left err)
         Right x -> unInfer (f x) s
 
-runInfer :: Scope MetaType -> (forall s. Infer s a) -> Either Err a
+newtype ZonedInferResult a b = ZonedInferResult (Either Err (a, b))
+    deriving (Functor, Foldable, Traversable)
+
+data Context = Context
+    { _inferFresh :: !Int
+    , _inferFrozen :: !RefZone.Frozen
+    }
+
+emptyContext :: Context
+emptyContext = Context 0 RefZone.emptyFrozen
+
+runInfer ::
+    Scope MetaType -> (forall s. Infer s a) ->
+    StateT Context (Either Err) a
 runInfer scope act =
-    runST $
-    do
-        fresh <- newSTRef 0
-        zone <- RefZone.new
-        unInfer act Env { envFresh = fresh, envZone = zone, envScope = scope }
+    StateT $ \(Context freshNum frozen) ->
+    let ZonedInferResult res =
+            RefZone.freeze $ do
+                fresh <- newSTRef freshNum
+                zone <- RefZone.clone frozen
+                eRes <- unInfer act Env { envFresh = fresh, envZone = zone, envScope = scope }
+                newFresh <- readSTRef fresh
+                eRes
+                    & Lens._Right %~ (\r -> ((newFresh, r), zone))
+                    & ZonedInferResult
+                    & return
+    in  res & Lens._Right %~
+        \((freshNum', res'), frozen') ->
+        (res', Context freshNum' frozen')
 
 {-# INLINE askEnv #-}
 askEnv :: InferEnv env s env
@@ -355,14 +381,24 @@ deref = \case
 derefAST :: IsTag tag => Type.AST tag MetaTypeAST -> Deref s (T tag)
 derefAST = fmap T . Type.ntraverse deref deref deref
 
+{-# INLINE runDeref #-}
+runDeref :: Deref s a -> Infer s a
+runDeref = fmap snd . runDerefWith
+
+runDerefWith :: Deref s a -> Infer s (SchemeBinders, a)
+runDerefWith act =
+    do
+        cacheRef <- newSTRef mempty & liftST
+        bindersRef <- newSTRef mempty & liftST
+        res <- localEnv (DerefEnv mempty cacheRef bindersRef) act
+        binders <- readSTRef bindersRef & liftST
+        return (binders, res)
+
 -- | Convert a meta-type's meta-variables to a scheme with quantified
 -- variables
 generalize :: IsTag tag => MetaTypeAST tag -> Infer s (Scheme tag)
 generalize t =
     {-# SCC "generalize" #-}
     do
-        cacheRef <- liftST $ newSTRef mempty
-        bindersRef <- liftST $ newSTRef mempty
-        typ <- deref t & localEnv (DerefEnv mempty cacheRef bindersRef)
-        binders <- liftST $ readSTRef bindersRef
+        (binders, typ) <- deref t & runDerefWith
         Scheme binders typ & return

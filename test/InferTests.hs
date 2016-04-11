@@ -4,17 +4,19 @@
 module Main
     ( test
     , examples
-    , tests, main
+    , main
     ) where
 
 import           Control.Lens.Operators
+import           Control.Lens.Tuple
+import           Control.Monad.State.Strict (evalStateT)
 import           Lamdu.Expr.Val.Pure (V(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Lamdu.Expr.Val.Pure as V
-import           Lamdu.Infer (inferScheme)
+import qualified Lamdu.Infer as Infer
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
 import qualified TestVals as Vals
-import           Text.PrettyPrint (vcat, Doc, (<+>))
+import           Text.PrettyPrint (vcat, Doc, (<+>), ($+$))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
@@ -23,10 +25,16 @@ test :: V -> Doc
 test x =
     {-# SCC "test" #-}
     pPrint x <+?>
-    case inferScheme Vals.env x of
+    case res of
     Left err -> "causes type error:" <+> pPrint err
-    Right (_, typ) -> " :: " <+> pPrint typ
-
+    Right (av, scheme) -> " :: " <+> pPrint scheme $+$ pPrint av
+    where
+        res =
+            (`evalStateT` Infer.emptyContext) $
+            Infer.runInfer Vals.env $
+            Infer.infer x
+            >>= _2 Infer.generalize
+            >>= Infer.runDeref . _1 (traverse Infer.deref)
 
 examples :: [V]
 examples =
@@ -64,8 +72,11 @@ examples =
     , V.lambda "x" $ V.toNom (fst Vals.closedStTypePair)
     ]
 
-tests :: Doc
-tests = vcat $ map test examples
+examplesDoc :: Doc
+examplesDoc = vcat $ map test examples
 
 main :: IO ()
-main = print tests
+main =
+    do
+        -- print resumption
+        print examplesDoc

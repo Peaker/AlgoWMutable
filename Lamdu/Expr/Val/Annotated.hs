@@ -22,7 +22,7 @@ instance Pretty a => Pretty (AV a) where
     pPrintPrec level prec (AV ann v)
         | isEmpty annDoc = pPrintPrec level prec v
         | otherwise =
-        "{" <> annDoc <> "}" <>
+        "PL{" <> annDoc <> "}" <>
         pPrintPrec level 10 v
         where
             annDoc = pPrint ann

@@ -4,20 +4,26 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 module Lamdu.Infer
-    ( Infer, M.runInfer, inferScheme, infer
+    ( Infer, infer, inferScheme
+    , Scope, RefZone.Frozen
+    , M.Context, M.emptyContext
+    , M.runInfer
+
+    , MetaType, M.generalize, M.deref, M.runDeref
     ) where
 
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Control.Monad (unless)
 import qualified Data.Map as Map
+import qualified Data.RefZone as RefZone
 import qualified Data.Set as Set
 import           GHC.Exts (inline)
 import           Lamdu.Expr.Identifier (Tag)
 import           Lamdu.Expr.Type (Type, AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Scheme (Scheme)
-import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
+import           Lamdu.Expr.Type.Tag (IsCompositeTag(..), ASTTag(..))
 import           Lamdu.Expr.Val (Val(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..))
@@ -251,7 +257,7 @@ infer (V v) =
     Val.BToNom x     -> inferToNom x
     Val.BCase x      -> inferCase x
 
-inferScheme :: Scope MetaType -> V -> Either M.Err (AV MetaType, Scheme 'TypeT)
-inferScheme scope x =
+inferScheme :: V -> M.Infer s (AV MetaType, Scheme 'TypeT)
+inferScheme x =
     {-# SCC "inferScheme" #-}
-    M.runInfer scope $ infer x >>= inline _2 M.generalize
+    infer x >>= inline _2 M.generalize

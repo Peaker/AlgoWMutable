@@ -1,20 +1,25 @@
 {-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
+import           Control.Monad.State.Strict (evalStateT)
+import           Control.Lens.Operators
 import           Criterion (Benchmarkable, nf)
 import           Criterion.Main (bench, defaultMain)
+import           Lamdu.Expr.Val.Pure (V(..))
+import qualified Lamdu.Infer as Infer
+import qualified TestVals
 import           Text.PrettyPrint ((<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
-import qualified TestVals
-import           Lamdu.Infer (inferScheme)
-import           Lamdu.Expr.Val.Pure (V(..))
 
 import           Prelude.Compat
 
 benchInfer :: V -> Benchmarkable
 benchInfer =
     nf $ \e ->
-    case inferScheme TestVals.env e of
+    let res =
+            Infer.runInfer TestVals.env (Infer.inferScheme e)
+            & (`evalStateT` Infer.emptyContext)
+    in case res of
     Left err -> error $ show $ "error:" <+> pPrint err
-    Right eTyped -> eTyped -- $ rnf $ eTyped ^.. folded . _1 . plType
+    Right (eTyped, _zone) -> eTyped -- $ rnf $ eTyped ^.. folded . _1 . plType
 
 benches :: [(String, Benchmarkable)]
 benches =

@@ -1,7 +1,7 @@
 {-# LANGUAGE RankNTypes, NoImplicitPrelude, GeneralizedNewtypeDeriving #-}
 module Data.RefZone
     ( Zone, new
-    , Frozen, freeze, clone
+    , Frozen, freeze, clone, emptyFrozen
     , Ref, newRef, readRef, writeRef, modifyRef
     ) where
 
@@ -31,6 +31,9 @@ data Zone s = Zone
 instance NFData (Zone s) where rnf (Zone s v) = s `seq` v `seq` ()
 
 newtype Frozen = Frozen (V.Vector Box)
+
+emptyFrozen :: Frozen
+emptyFrozen = Frozen mempty
 
 {-# INLINE initialSize #-}
 initialSize :: Int
