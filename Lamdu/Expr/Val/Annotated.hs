@@ -1,22 +1,28 @@
 -- | Annotated vals
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
-module Lamdu.Expr.Val.Annotated (AV(..)) where
+module Lamdu.Expr.Val.Annotated
+    ( AV(..)
+    , annotation
+    , val
+    ) where
 
-import Control.DeepSeq (NFData(..))
-import Lamdu.Expr.Val (Val(..))
-import Pretty.Map ()
-import Text.PrettyPrint (isEmpty, (<>))
-import Text.PrettyPrint.HughesPJClass (Pretty(..))
+import           Control.DeepSeq (NFData(..))
+import qualified Control.Lens as Lens
+import           Lamdu.Expr.Val (Val(..))
+import           Pretty.Map ()
+import           Text.PrettyPrint (isEmpty, (<>))
+import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
-import Prelude.Compat
+import           Prelude.Compat
 
 data AV a = AV
-    { aAnnotation :: a
-    , aVal :: Val (AV a)
+    { _annotation :: a
+    , _val :: Val (AV a)
     } deriving (Show, Functor, Foldable, Traversable)
 instance Pretty a => Pretty (AV a) where
     pPrintPrec level prec (AV ann v)
@@ -29,3 +35,4 @@ instance Pretty a => Pretty (AV a) where
 instance NFData a => NFData (AV a) where
     rnf (AV ann val) = rnf ann `seq` rnf val
 
+Lens.makeLenses ''AV
