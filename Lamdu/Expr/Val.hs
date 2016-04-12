@@ -7,14 +7,14 @@ module Lamdu.Expr.Val
     , Body(..)
       , _BLam, _BApp, _BRecExtend, _BCase, _BGetField
       , _BInject, _BFromNom, _BToNom, _BLeaf
-    , Lam(..), lamParamId, lamResult
-    , Var(..), var
     , Apply(..), applyFunc, applyArg
-    , RecExtend(..), recTag, recFieldVal, recRest
-    , Case(..), caseTag, caseMatch, caseMismatch
     , GetField(..), getFieldTag, getFieldRecord
     , Inject(..), injectTag, injectVal
+    , Case(..), caseTag, caseMatch, caseMismatch
+    , Lam(..), lamParamId, lamResult
+    , RecExtend(..), recTag, recFieldVal, recRest
     , Nom(..), nomId, nomVal
+    , Var(..), var
     ) where
 
 import           Control.DeepSeq (NFData(..))
