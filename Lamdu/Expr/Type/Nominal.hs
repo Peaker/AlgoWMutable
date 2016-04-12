@@ -38,8 +38,8 @@ instance NFData NominalType where
     rnf (NominalType pType) = rnf pType
 
 data Nominal = Nominal
-    { nParams :: Set (TParamId 'TypeT)
-    , nType :: NominalType
+    { nParams :: !(Set (TParamId 'TypeT))
+    , nType :: !NominalType
     }
 instance NFData Nominal where
     rnf (Nominal a b) = rnf a `seq` rnf b
