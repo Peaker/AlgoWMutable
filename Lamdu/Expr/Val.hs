@@ -1,11 +1,5 @@
 -- | Val AST
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NoImplicitPrelude, TemplateHaskell, OverloadedStrings, GeneralizedNewtypeDeriving, DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module Lamdu.Expr.Val
     ( Leaf(..)
       , _LVar, _LEmptyRecord, _LAbsurd, _LLiteral, _LHole
@@ -15,7 +9,7 @@ module Lamdu.Expr.Val
       , _BInject, _BFromNom, _BToNom, _BLeaf
     , Abs(..), lamParamId, lamResult
     , Var(..), var
-    , App(..), applyFunc, applyArg
+    , Apply(..), applyFunc, applyArg
     , RecExtend(..), recTag, recFieldVal, recRest
     , Case(..), caseTag, caseMatch, caseMismatch
     , GetField(..), getFieldTag, getFieldRecord
@@ -76,11 +70,11 @@ data Abs v = Abs
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Abs v) where rnf (Abs a b) = rnf a `seq` rnf b
 
-data App v = App
+data Apply v = Apply
     { _applyFunc :: !v
     , _applyArg :: !v
     } deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (App v) where rnf (App a b) = rnf a `seq` rnf b
+instance NFData v => NFData (Apply v) where rnf (Apply a b) = rnf a `seq` rnf b
 
 data RecExtend v = RecExtend
     { _recTag :: Tag
@@ -116,7 +110,7 @@ instance NFData v => NFData (Nom v) where rnf (Nom a b) = rnf a `seq` rnf b
 
 data Body v
     = BLam (Abs v)
-    | BApp (App v)
+    | BApp (Apply v)
     | BRecExtend (RecExtend v)
     | BCase (Case v)
     | BGetField (GetField v)
@@ -141,7 +135,7 @@ instance Pretty v => Pretty (Body v) where
     pPrintPrec level prec (BLam (Abs name body)) =
         maybeParens (prec > 0) $
         pPrint name <+> "→" <+> pPrintPrec level 0 body
-    pPrintPrec level prec (BApp (App func arg)) =
+    pPrintPrec level prec (BApp (Apply func arg)) =
         maybeParens (prec > 9) $
         pPrintPrec level 9 func <+> pPrintPrec level 10 arg
     pPrintPrec level prec (BRecExtend (RecExtend name val rest)) =
@@ -173,7 +167,7 @@ Lens.makeLenses ''PrimVal
 Lens.makeLenses ''Abs
 Lens.makeLenses ''Inject
 Lens.makeLenses ''GetField
-Lens.makeLenses ''App
+Lens.makeLenses ''Apply
 Lens.makeLenses ''Nom
 Lens.makeLenses ''RecExtend
 Lens.makeLenses ''Case

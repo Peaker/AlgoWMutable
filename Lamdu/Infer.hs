@@ -96,8 +96,8 @@ inferLam (Val.Abs n body) =
         (body', resType) <- infer body & M.localScope (Scope.insertLocal n nType)
         return (Val.BLam (Val.Abs n body'), TFun nType resType & MetaTypeAST)
 
-inferApp :: Val.App (AV a) -> InferAction s a
-inferApp (Val.App fun arg) =
+inferApp :: Val.Apply (AV a) -> InferAction s a
+inferApp (Val.Apply fun arg) =
     {-# SCC "inferApp" #-}
     do
         (fun', funTyp) <- infer fun
@@ -116,7 +116,7 @@ inferApp (Val.App fun arg) =
                     return resTyp
             MetaTypeAST t ->
                 M.DoesNotUnify (pPrint t) "Function type" & M.throwError
-        return (Val.BApp (Val.App fun' arg'), resTyp)
+        return (Val.BApp (Val.Apply fun' arg'), resTyp)
 
 inferRecExtend :: Val.RecExtend (AV a) -> InferAction s a
 inferRecExtend (Val.RecExtend name val rest) =

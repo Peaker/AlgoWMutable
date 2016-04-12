@@ -82,7 +82,7 @@ hole = AV mempty $ V.BLeaf V.LHole
 
 infixl 4 $$
 ($$) :: Monoid a => AV a -> AV a -> AV a
-($$) f a = AV mempty $ V.BApp $ V.App f a
+($$) f a = AV mempty $ V.BApp $ V.Apply f a
 
 ($$:) :: Monoid a => AV a -> [(Tag, AV a)] -> AV a
 func $$: fields = func $$ recVal fields
