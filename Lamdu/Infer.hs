@@ -17,7 +17,6 @@ module Lamdu.Infer
     , MetaType, M.generalize, M.deref, M.runDeref
     ) where
 
-import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
@@ -53,7 +52,6 @@ data Payload = Payload
     { _plType :: MetaType
     , _plScope :: Scope
     } deriving (Generic, Typeable)
-instance NFData Payload where rnf (Payload a b) = rnf a `seq` rnf b
 
 Lens.makeLenses ''Payload
 

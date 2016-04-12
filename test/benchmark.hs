@@ -1,4 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
+import           Control.Lens.Tuple
+import qualified Control.Lens as Lens
 import           Control.Monad.State.Strict (evalStateT)
 import           Control.Lens.Operators
 import           Criterion (Benchmarkable, nf)
@@ -15,7 +17,7 @@ benchInfer =
     nf $ \e ->
     Infer.runInfer TestVals.env (Infer.inferScheme e)
     & (`evalStateT` Infer.emptyContext)
-    & either (error . show . pPrint) id
+    & either (error . show . pPrint) (_1 . Lens.mapped %~ (^. Infer.plType) . fst)
 
 benches :: [(String, Benchmarkable)]
 benches =
