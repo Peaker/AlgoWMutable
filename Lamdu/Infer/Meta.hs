@@ -63,8 +63,8 @@ type MetaVar tag = RefZone.Ref (Link tag)
 
 -- | Type.AST fixpoint that adds meta-variables
 data MetaTypeAST tag
-    = MetaTypeVar (MetaVar tag)
-    | MetaTypeAST (Type.AST tag MetaTypeAST)
+    = MetaTypeVar {-# UNPACK #-}!(MetaVar tag)
+    | MetaTypeAST !(Type.AST tag MetaTypeAST)
 instance NFData (MetaTypeAST tag) where
     rnf (MetaTypeVar x) = rnf x
     rnf (MetaTypeAST x) = rnf x
