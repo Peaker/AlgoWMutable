@@ -43,7 +43,7 @@ instance Pretty (TVarName tag) where
 
 data AST (tag :: ASTTag) ast where
     -- | A skolem is a quantified type-variable (from a Scheme binder)
-    TSkolem :: TVarName tag -> AST tag ast
+    TSkolem :: {-# UNPACK #-}!(TVarName tag) -> AST tag ast
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> AST 'TypeT ast
     TInst :: {-# UNPACK #-}!NominalId -> !(Map (TParamId 'TypeT) (ast 'TypeT)) -> AST 'TypeT ast
     TRecord :: !(ast RecordT) -> AST 'TypeT ast
