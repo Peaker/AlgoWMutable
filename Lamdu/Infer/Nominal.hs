@@ -12,7 +12,7 @@ module Lamdu.Infer.Nominal
 
 import           Control.Lens.Operators
 import           Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import           Data.STRef
 import           Lamdu.Expr.Identifier (NominalId, TParamId)
 import qualified Lamdu.Expr.Type as Type

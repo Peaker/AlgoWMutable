@@ -22,7 +22,7 @@ import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Data.Foldable (traverse_)
 import           Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import           Data.Proxy (Proxy(..))
 import           Lamdu.Expr.Identifier (Tag, NominalId, TParamId)
 import           Lamdu.Expr.Type.Tag

@@ -134,15 +134,15 @@ instance Match Nom where
         | otherwise = Nothing
 
 data Body v
-    = BLam (Lam v)
-    | BApp (Apply v)
-    | BRecExtend (RecExtend v)
-    | BCase (Case v)
-    | BGetField (GetField v)
-    | BInject (Inject v)
-    | BFromNom (Nom v)
-    | BToNom (Nom v)
-    | BLeaf Leaf
+    = BLam !(Lam v)
+    | BApp !(Apply v)
+    | BRecExtend !(RecExtend v)
+    | BCase !(Case v)
+    | BGetField !(GetField v)
+    | BInject !(Inject v)
+    | BFromNom !(Nom v)
+    | BToNom !(Nom v)
+    | BLeaf !Leaf
     deriving (Show, Functor, Foldable, Traversable)
 
 instance NFData v => NFData (Body v) where

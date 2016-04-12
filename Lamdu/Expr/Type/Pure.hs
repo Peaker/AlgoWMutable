@@ -10,7 +10,7 @@ module Lamdu.Expr.Type.Pure
     ) where
 
 import           Control.DeepSeq (NFData(..))
-import           Data.Map (Map)
+import           Data.Map.Strict (Map)
 import           Lamdu.Expr.Identifier (Tag, NominalId, TParamId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))

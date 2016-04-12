@@ -15,7 +15,7 @@ module TestVals
 
 import           Control.Lens.Operators
 import qualified Data.IntMap as IntMap
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import           Lamdu.Expr.Identifier (NominalId, Tag)
 import           Lamdu.Expr.Type (AST(..))

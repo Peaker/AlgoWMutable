@@ -22,7 +22,7 @@ import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Monad (unless, zipWithM_, void)
 import           Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Monoid as Monoid
 import           Data.RefZone (Ref)
 import qualified Data.RefZone.RefSet as RefSet

@@ -21,7 +21,7 @@ import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Control.Monad (unless)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.RefZone as RefZone
 import qualified Data.Set as Set
 import           Data.Typeable (Typeable)

@@ -14,7 +14,7 @@ module Lamdu.Infer.Scope
 import           Control.DeepSeq (NFData(..))
 import           Control.Lens.Operators
 import           Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import           Lamdu.Expr.Identifier (NominalId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
@@ -30,10 +30,10 @@ import           Pretty.Map ()
 import           Prelude.Compat
 
 data Scope = Scope
-    { _scopeSkolems :: SkolemScope
-    , _scopeLocals :: Map Val.Var MetaType
-    , _scopeNominals :: Map NominalId Nominal
-    , _scopeGlobals :: Map Val.Var (Scheme 'TypeT)
+    { _scopeSkolems :: !SkolemScope
+    , _scopeLocals :: !(Map Val.Var MetaType)
+    , _scopeNominals :: !(Map NominalId Nominal)
+    , _scopeGlobals :: !(Map Val.Var (Scheme 'TypeT))
     }
 instance NFData Scope where
     rnf (Scope a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
