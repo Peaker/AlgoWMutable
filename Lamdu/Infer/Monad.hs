@@ -98,8 +98,8 @@ instance Pretty Err where
         "Constraints unavailable:" <+> pPrint tag <+> skolem
 
 data Env s = Env
-    { envFresh :: STRef s Int
-    , envZone :: Zone s
+    { envFresh :: {-# UNPACK #-}!(STRef s Int)
+    , envZone :: {-# UNPACK #-}!(Zone s)
     , envScope :: Scope
     }
 
