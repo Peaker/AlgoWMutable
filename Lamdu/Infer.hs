@@ -269,7 +269,7 @@ infer (AV pl val) =
     where
         annotate (val', typ) =
             do
-                scope <- M.askEnv <&> M.envScope
+                scope <- M.askScope
                 return (AV (Payload typ scope, pl) val', typ)
 
 inferScheme :: AV a -> M.Infer s (AV (Payload, a), Scheme 'TypeT)
