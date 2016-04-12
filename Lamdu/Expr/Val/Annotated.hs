@@ -57,7 +57,7 @@ toNom :: Monoid a => NominalId -> AV a -> AV a
 toNom nomId = AV mempty . V.BToNom . V.Nom nomId
 
 lam :: Monoid a => V.Var -> AV a -> AV a
-lam name body = AV mempty $ V.BLam $ V.Abs name body
+lam name body = AV mempty $ V.BLam $ V.Lam name body
 
 lambda :: Monoid a => V.Var -> (AV a -> AV a) -> AV a
 lambda name body = lam name $ body $ var name

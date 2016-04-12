@@ -7,7 +7,7 @@ module Lamdu.Expr.Val
     , Body(..)
       , _BLam, _BApp, _BRecExtend, _BCase, _BGetField
       , _BInject, _BFromNom, _BToNom, _BLeaf
-    , Abs(..), lamParamId, lamResult
+    , Lam(..), lamParamId, lamResult
     , Var(..), var
     , Apply(..), applyFunc, applyArg
     , RecExtend(..), recTag, recFieldVal, recRest
@@ -64,11 +64,11 @@ instance Pretty Leaf where
 newtype Var = Var { _var :: Identifier }
     deriving (Eq, Ord, Show, NFData, IsString, Pretty)
 
-data Abs v = Abs
+data Lam v = Lam
     { _lamParamId :: Var
     , _lamResult :: !v
     } deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (Abs v) where rnf (Abs a b) = rnf a `seq` rnf b
+instance NFData v => NFData (Lam v) where rnf (Lam a b) = rnf a `seq` rnf b
 
 data Apply v = Apply
     { _applyFunc :: !v
@@ -109,7 +109,7 @@ data Nom v = Nom
 instance NFData v => NFData (Nom v) where rnf (Nom a b) = rnf a `seq` rnf b
 
 data Body v
-    = BLam (Abs v)
+    = BLam (Lam v)
     | BApp (Apply v)
     | BRecExtend (RecExtend v)
     | BCase (Case v)
@@ -132,7 +132,7 @@ instance NFData v => NFData (Body v) where
     rnf (BLeaf x) = rnf x
 
 instance Pretty v => Pretty (Body v) where
-    pPrintPrec level prec (BLam (Abs name body)) =
+    pPrintPrec level prec (BLam (Lam name body)) =
         maybeParens (prec > 0) $
         pPrint name <+> "→" <+> pPrintPrec level 0 body
     pPrintPrec level prec (BApp (Apply func arg)) =
@@ -164,7 +164,7 @@ instance Pretty v => Pretty (Body v) where
 
 Lens.makeLenses ''Var
 Lens.makeLenses ''PrimVal
-Lens.makeLenses ''Abs
+Lens.makeLenses ''Lam
 Lens.makeLenses ''Inject
 Lens.makeLenses ''GetField
 Lens.makeLenses ''Apply

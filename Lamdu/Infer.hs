@@ -88,13 +88,13 @@ inferLeaf leaf =
             Nothing -> M.throwError $ M.VarNotInScope n
     <&> (,) (Val.BLeaf leaf)
 
-inferLam :: Val.Abs (AV a) -> InferAction s a
-inferLam (Val.Abs n body) =
+inferLam :: Val.Lam (AV a) -> InferAction s a
+inferLam (Val.Lam n body) =
     {-# SCC "inferLam" #-}
     do
         nType <- M.freshMetaVar TypeConstraints
         (body', resType) <- infer body & M.localScope (Scope.insertLocal n nType)
-        return (Val.BLam (Val.Abs n body'), TFun nType resType & MetaTypeAST)
+        return (Val.BLam (Val.Lam n body'), TFun nType resType & MetaTypeAST)
 
 inferApp :: Val.Apply (AV a) -> InferAction s a
 inferApp (Val.Apply fun arg) =
