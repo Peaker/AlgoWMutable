@@ -12,7 +12,7 @@
 {-# LANGUAGE RankNTypes #-}
 module Lamdu.Infer.Monad
     ( InferEnv
-    , Env, localEnv, askEnv, askScope
+    , Env, localEnv, askEnv
     , Infer
     , Err(..), throwError
     , Context, emptyContext
@@ -20,14 +20,13 @@ module Lamdu.Infer.Monad
     , repr
     , liftST
     , freshTVarName
-    , freshRef, freshRefWith
+    , freshRefWith
     , readRef, writeRef
     , freshMetaVar
-    , localScope
-    , withSkolemScope
+    , extendSkolemScope
     , lookupSkolem
-    , lookupGlobal, lookupLocal, lookupNominal
-    , ReplaceSkolem, Unwrap
+    , lookupNominal
+    , Unwrap
     , instantiate, instantiateBinders
     ) where
 
@@ -46,15 +45,16 @@ import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Nominal (Nominal)
 import           Lamdu.Expr.Type.Pure (T(..))
-import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..))
+import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..), schemeBindersLookup)
 import           Lamdu.Expr.Type.Tag
-    ( ASTTag(..), ASTTagEquality(..), IsTag(..), CompositeTagEquality(..) )
+    ( ASTTagEquality(..), IsTag(..), CompositeTagEquality(..) )
 import           Lamdu.Expr.Val (Var)
 import           Lamdu.Infer.Meta
-    ( MetaType, MetaVar, MetaTypeAST(..), Link(..), Final(..), MetaVarInfo(..) )
+    ( MetaVar, MetaTypeAST(..), Link(..), Final(..), MetaVarInfo(..) )
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
-import           Lamdu.Infer.Scope.Skolems (SkolemScopeId(..))
+import           Lamdu.Infer.Scope.Skolems
+    ( SkolemScope, SkolemScopeId(..), skolemScopeBinders )
 import           Pretty.Utils (intercalate)
 import           Text.PrettyPrint (Doc, (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
@@ -100,7 +100,6 @@ instance Pretty Err where
 data Env s = Env
     { envFresh :: {-# UNPACK #-}!(STRef s Int)
     , envZone :: {-# UNPACK #-}!(Zone s)
-    , envScope :: Scope
     }
 
 newtype InferEnv env s a = Infer
@@ -138,15 +137,16 @@ emptyContext :: Context
 emptyContext = Context 0 RefZone.emptyFrozen
 
 runInfer ::
-    Scope -> (forall s. Infer s a) ->
+    (forall s. Infer s a) ->
     StateT Context (Either Err) a
-runInfer scope act =
+runInfer act =
     StateT $ \(Context freshNum frozen) ->
     let ZonedInferResult res =
             RefZone.freeze $ do
                 fresh <- newSTRef freshNum
                 zone <- RefZone.clone frozen
-                eRes <- unInfer act Env { envFresh = fresh, envZone = zone, envScope = scope }
+                eRes <-
+                    unInfer act Env { envFresh = fresh, envZone = zone }
                 newFresh <- readSTRef fresh
                 eRes
                     & Lens._Right %~ (\r -> ((newFresh, r), zone))
@@ -191,35 +191,18 @@ writeRef ref val =
         zone <- askEnv <&> envZone
         RefZone.writeRef zone ref val & liftST
 
-{-# INLINE localScope #-}
-localScope ::
-    (Scope -> Scope) ->
-    Infer s a -> Infer s a
-localScope f = localEnv $ \e -> e { envScope = f (envScope e) }
-
-{-# INLINE askScope #-}
-askScope :: Infer s Scope
-askScope = askEnv <&> envScope
-
 {-# INLINE lookupNominal #-}
-lookupNominal :: NominalId -> Infer s Nominal
-lookupNominal n =
-    askScope <&> Scope.lookupNominal n
-    >>= maybe (throwError (NominalNotInScope n)) return
+lookupNominal :: NominalId -> Scope -> Infer s Nominal
+lookupNominal n scope =
+    Scope.lookupNominal n scope
+    & maybe (throwError (NominalNotInScope n)) return
 
 {-# INLINE lookupSkolem #-}
-lookupSkolem :: IsTag tag => Type.TVarName tag -> Infer s (Constraints tag)
-lookupSkolem v =
-    askScope <&> Scope.lookupSkolem v
-    >>= maybe (throwError (SkolemNotInScope (pPrint v))) return
-
-{-# INLINE lookupLocal #-}
-lookupLocal :: Var -> Infer s (Maybe MetaType)
-lookupLocal v = askScope <&> Scope.lookupLocal v
-
-{-# INLINE lookupGlobal #-}
-lookupGlobal :: Var -> Infer s (Maybe (Scheme 'TypeT))
-lookupGlobal v = askScope <&> Scope.lookupGlobal v
+lookupSkolem :: IsTag tag => Type.TVarName tag -> SkolemScope -> Infer s (Constraints tag)
+lookupSkolem v scope =
+    skolemScopeBinders scope
+    & schemeBindersLookup v
+    & maybe (throwError (SkolemNotInScope (pPrint v))) return
 
 nextFresh :: Infer s Int
 nextFresh =
@@ -235,25 +218,15 @@ nextFresh =
 freshRefWith :: MetaVarInfo tag -> Infer s (MetaVar tag)
 freshRefWith = newRef . LinkFinal . Unbound
 
-{-# INLINE freshRef #-}
-freshRef :: Constraints tag -> Infer s (MetaVar tag)
-freshRef cs =
-    do
-        skolemScope <- askScope <&> Scope.skolemScope
-        MetaVarInfo cs skolemScope & freshRefWith
-
-withSkolemScope :: SchemeBinders -> Infer s a -> Infer s a
-withSkolemScope binders act =
+extendSkolemScope :: SchemeBinders -> Scope -> Infer s Scope
+extendSkolemScope binders scope =
     do
         freshId <- nextFresh <&> SkolemScopeId
-        localScope (Scope.extendSkolemScope freshId binders) act
+        Scope.extendSkolemScope freshId binders scope & return
 
 {-# INLINE freshMetaVar #-}
-freshMetaVar :: Constraints tag -> Infer s (MetaTypeAST tag)
-freshMetaVar cs = freshRef cs <&> MetaTypeVar
-
-type ReplaceSkolem m =
-    forall tag. IsTag tag => Constraints tag -> m (MetaTypeAST tag)
+freshMetaVar :: MetaVarInfo tag -> Infer s (MetaTypeAST tag)
+freshMetaVar info = freshRefWith info <&> MetaTypeVar
 
 type Unwrap m f =
     forall tag. IsTag tag =>
@@ -263,8 +236,8 @@ type Unwrap m f =
 -- | Convert a Scheme's bound/quantified variables to meta-variables
 instantiateBinders ::
     forall m f tag. (Monad m, IsTag tag) =>
-    ReplaceSkolem m -> SchemeBinders -> f tag ->
-    Unwrap m f -> m (MetaTypeAST tag)
+    (forall tag'. IsTag tag' => Constraints tag' -> m (MetaTypeAST tag')) ->
+    SchemeBinders -> f tag -> Unwrap m f -> m (MetaTypeAST tag)
 instantiateBinders replaceSkolem (SchemeBinders typeVars recordVars sumVars) typ unwrap =
     {-# SCC "instantiate" #-}
     do
@@ -286,8 +259,9 @@ instantiateBinders replaceSkolem (SchemeBinders typeVars recordVars sumVars) typ
         unwrap goTop typ
 
 -- | Convert a Scheme's bound/quantified variables to meta-variables
-instantiate :: IsTag tag => Scheme tag -> Infer s (MetaTypeAST tag)
-instantiate (Scheme binders typ) = instantiateBinders freshMetaVar binders typ (. unT)
+instantiate :: IsTag tag => Scheme tag -> SkolemScope -> Infer s (MetaTypeAST tag)
+instantiate (Scheme binders typ) skolemScope =
+    instantiateBinders (freshMetaVar . (`MetaVarInfo` skolemScope)) binders typ (. unT)
 
 repr :: MetaVar tag -> Infer s (MetaVar tag, Final tag)
 repr x =

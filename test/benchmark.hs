@@ -15,7 +15,7 @@ import           Prelude.Compat
 benchInfer :: AV () -> Benchmarkable
 benchInfer =
     nf $ \e ->
-    Infer.runInfer TestVals.env (Infer.inferScheme e)
+    Infer.runInfer (Infer.inferScheme e TestVals.env)
     & (`evalStateT` Infer.emptyContext)
     & either (error . show . pPrint) (_1 . Lens.mapped %~ (^. Infer.plType) . fst)
 

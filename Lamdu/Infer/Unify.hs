@@ -382,7 +382,11 @@ unifyCompositeOpenToAST !uFields !vFields (uRef, uInfo) (_vLink, vAST) =
             unifyCompositeOpenToClosed (uRef, uInfo, uFields) (allVFields, Nothing)
         go !allVFields (TSkolem skolemName) =
             do
-                constraints <- M.lookupSkolem skolemName
+                -- skolemName (from v) must appear in u's skolem scope
+                -- because otherwise it escapes
+                constraints <-
+                    metaVarSkolemScope uInfo
+                    & M.lookupSkolem skolemName
                 unifyCompositeOpenToClosed (uRef, uInfo, uFields)
                     (allVFields, Just (skolemName, constraints))
         go !allVFields (TCompositeExtend n t r) =

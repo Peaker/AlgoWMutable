@@ -7,20 +7,17 @@ module Lamdu.Infer.Scope
     , skolemScope
     , newScope, emptyScope
     , insertLocal
-    , lookupLocal, lookupGlobal, lookupSkolem, lookupNominal
+    , lookupLocal, lookupGlobal, lookupNominal
     , extendSkolemScope
     ) where
 
 import           Control.DeepSeq (NFData(..))
-import           Control.Lens.Operators
 import           Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import           Lamdu.Expr.Identifier (NominalId)
-import qualified Lamdu.Expr.Type as Type
-import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Nominal (Nominal)
-import           Lamdu.Expr.Type.Scheme (Scheme, SchemeBinders, schemeBindersLookup)
-import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..))
+import           Lamdu.Expr.Type.Scheme (Scheme, SchemeBinders)
+import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Infer.Meta (MetaType)
 import           Lamdu.Infer.Scope.Skolems (SkolemScope(..), SkolemScopeId)
@@ -53,11 +50,6 @@ lookupGlobal v Scope{_scopeGlobals} = Map.lookup v _scopeGlobals
 
 lookupNominal :: NominalId -> Scope -> Maybe Nominal
 lookupNominal v Scope{_scopeNominals} = Map.lookup v _scopeNominals
-
-lookupSkolem :: IsTag tag => Type.TVarName tag -> Scope -> Maybe (Constraints tag)
-lookupSkolem tVarName Scope{_scopeSkolems} =
-    skolemScopeBinders _scopeSkolems
-    & schemeBindersLookup tVarName
 
 {-# INLINE insertLocal #-}
 insertLocal :: Val.Var -> MetaType -> Scope -> Scope

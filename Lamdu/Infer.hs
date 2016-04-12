@@ -23,6 +23,7 @@ import           Control.Lens.Tuple
 import           Control.Monad (unless)
 import qualified Data.Map.Strict as Map
 import qualified Data.RefZone as RefZone
+import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Typeable (Typeable)
 import           GHC.Exts (inline)
@@ -35,10 +36,10 @@ import           Lamdu.Expr.Type.Tag (IsCompositeTag(..), ASTTag(..))
 import           Lamdu.Expr.Val (Body(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..))
+import qualified Lamdu.Infer.Deref as Deref
 import           Lamdu.Infer.Meta
 import           Lamdu.Infer.Monad (Infer)
 import qualified Lamdu.Infer.Monad as M
-import qualified Lamdu.Infer.Deref as Deref
 import qualified Lamdu.Infer.Nominal as InferNominal
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
@@ -56,10 +57,22 @@ data Payload = Payload
 
 Lens.makeLenses ''Payload
 
-type InferAction s a = Infer s (Body (AV (Payload, a)), MetaType)
+type InferAction s a = Scope -> Infer s (Body (AV (Payload, a)), MetaType)
+
+freshMetaTypeVar :: Scope -> Infer s (MetaTypeAST 'TypeT)
+freshMetaTypeVar scope =
+    MetaVarInfo TypeConstraints (Scope.skolemScope scope)
+    & M.freshMetaVar
+
+freshMetaCompositeVar :: Set Tag -> Scope -> Infer s (MetaTypeAST ('CompositeT c))
+freshMetaCompositeVar forbidden scope =
+    MetaVarInfo
+    (CompositeConstraints forbidden)
+    (Scope.skolemScope scope)
+    & M.freshMetaVar
 
 inferLeaf :: Val.Leaf -> InferAction s a
-inferLeaf leaf =
+inferLeaf leaf scope =
     {-# SCC "inferLeaf" #-}
     case leaf of
     Val.LEmptyRecord ->
@@ -68,46 +81,44 @@ inferLeaf leaf =
     Val.LAbsurd ->
         {-# SCC "inferAbsurd" #-}
         do
-            res <- M.freshMetaVar TypeConstraints
+            res <- freshMetaTypeVar scope
             let emptySum = MetaTypeAST TEmptyComposite & TSum & MetaTypeAST
             TFun emptySum res & MetaTypeAST & return
     Val.LLiteral (Val.PrimVal nomId _) ->
         {-# SCC "inferLiteral" #-}
         MetaTypeAST (TInst nomId Map.empty) & return
-    Val.LHole ->
-        {-# SCC "inferHole" #-}
-        M.freshMetaVar TypeConstraints
+    Val.LHole -> {-# SCC "inferHole" #-}freshMetaTypeVar scope
     Val.LVar n ->
         {-# SCC "inferVar" #-}
-        M.lookupLocal n >>= \case
+        case Scope.lookupLocal n scope of
         Just typ -> return typ
         Nothing ->
             {-# SCC "inferGlobal" #-}
-            M.lookupGlobal n >>= \case
-            Just scheme -> M.instantiate scheme
+            case Scope.lookupGlobal n scope of
+            Just scheme -> M.instantiate scheme (Scope.skolemScope scope)
             Nothing -> M.throwError $ M.VarNotInScope n
     <&> (,) (Val.BLeaf leaf)
 
 inferLam :: Val.Lam (AV a) -> InferAction s a
-inferLam (Val.Lam n body) =
+inferLam (Val.Lam n body) scope =
     {-# SCC "inferLam" #-}
     do
-        nType <- M.freshMetaVar TypeConstraints
-        (body', resType) <- infer body & M.localScope (Scope.insertLocal n nType)
+        nType <- freshMetaTypeVar scope
+        (body', resType) <- infer body (Scope.insertLocal n nType scope)
         return (Val.BLam (Val.Lam n body'), TFun nType resType & MetaTypeAST)
 
 inferApp :: Val.Apply (AV a) -> InferAction s a
-inferApp (Val.Apply fun arg) =
+inferApp (Val.Apply fun arg) scope =
     {-# SCC "inferApp" #-}
     do
-        (fun', funTyp) <- infer fun
-        (arg', argTyp) <- infer arg
+        (fun', funTyp) <- infer fun scope
+        (arg', argTyp) <- infer arg scope
         -- TODO: Maybe a simple unify, if inlined, will be as fast?
         resTyp <-
             case funTyp of
             MetaTypeVar ref ->
                 do
-                    resTyp <- M.freshMetaVar TypeConstraints
+                    resTyp <- freshMetaTypeVar scope
                     unifyTypeVar ref (TFun argTyp resTyp)
                     return resTyp
             MetaTypeAST (TFun paramTyp resTyp) ->
@@ -119,27 +130,26 @@ inferApp (Val.Apply fun arg) =
         return (Val.BApp (Val.Apply fun' arg'), resTyp)
 
 inferRecExtend :: Val.RecExtend (AV a) -> InferAction s a
-inferRecExtend (Val.RecExtend name val rest) =
+inferRecExtend (Val.RecExtend name val rest) scope =
     {-# SCC "inferRecExtend" #-}
     do
-        (rest', restTyp) <- infer rest
+        (rest', restTyp) <- infer rest scope
         restRecordTyp <-
             case restTyp of
             MetaTypeVar ref ->
                 do
                     unknownRestFields <-
-                        M.freshMetaVar $ CompositeConstraints $
-                        Set.singleton name
+                        freshMetaCompositeVar (Set.singleton name) scope
                     -- TODO (Optimization): ref known to be unbound
                     unifyTypeVar ref (TRecord unknownRestFields)
                     return unknownRestFields
             MetaTypeAST (TRecord restRecordTyp) ->
                 do
-                    propagateConstraint name restRecordTyp
+                    propagateConstraint name scope restRecordTyp
                     return restRecordTyp
             MetaTypeAST t ->
                 M.DoesNotUnify (pPrint t) "Record type" & M.throwError
-        (val', valTyp) <- infer val
+        (val', valTyp) <- infer val scope
         let typ =
                 TCompositeExtend name valTyp restRecordTyp
                 & MetaTypeAST
@@ -147,8 +157,8 @@ inferRecExtend (Val.RecExtend name val rest) =
         return (Val.BRecExtend (Val.RecExtend name val' rest'), typ)
     where
 
-propagateConstraint :: IsCompositeTag c => Tag -> MetaComposite c -> Infer s ()
-propagateConstraint tagName =
+propagateConstraint :: IsCompositeTag c => Tag -> Scope -> MetaComposite c -> Infer s ()
+propagateConstraint tagName scope =
     \case
     MetaTypeAST x -> toBound x
     MetaTypeVar ref ->
@@ -162,28 +172,29 @@ propagateConstraint tagName =
     where
         toBound (TSkolem tv) =
             do
-                CompositeConstraints oldConstraints <- M.lookupSkolem tv
+                CompositeConstraints oldConstraints <-
+                    M.lookupSkolem tv (Scope.skolemScope scope)
                 unless (tagName `Set.member` oldConstraints) $
                     M.ConstraintUnavailable tagName ("in skolem" <+> pPrint tv)
                     & M.throwError
         toBound TEmptyComposite = return ()
         toBound (TCompositeExtend fieldTag _ restTyp)
             | fieldTag == tagName = M.DuplicateFields [tagName] & M.throwError
-            | otherwise = propagateConstraint tagName restTyp
+            | otherwise = propagateConstraint tagName scope restTyp
 
 inferCase :: Val.Case (AV a) -> InferAction s a
-inferCase (Val.Case name handler restHandler) =
+inferCase (Val.Case name handler restHandler) scope =
     {-# SCC "inferCase" #-}
     do
-        resType <- M.freshMetaVar TypeConstraints
+        resType <- freshMetaTypeVar scope
         let toResType x = TFun x resType & MetaTypeAST
 
-        fieldType <- M.freshMetaVar TypeConstraints
+        fieldType <- freshMetaTypeVar scope
 
-        (handler', handlerTyp) <- infer handler
-        (restHandler', restHandlerTyp) <- infer restHandler
+        (handler', handlerTyp) <- infer handler scope
+        (restHandler', restHandlerTyp) <- infer restHandler scope
 
-        sumTail <- M.freshMetaVar $ CompositeConstraints $ Set.singleton name
+        sumTail <- freshMetaCompositeVar (Set.singleton name) scope
 
         let expectedHandlerTyp = toResType fieldType
         unifyType expectedHandlerTyp handlerTyp
@@ -197,13 +208,13 @@ inferCase (Val.Case name handler restHandler) =
         return (Val.BCase (Val.Case name handler' restHandler'), typ)
 
 inferGetField :: Val.GetField (AV a) -> InferAction s a
-inferGetField (Val.GetField val name) =
+inferGetField (Val.GetField val name) scope =
     {-# SCC "inferGetField" #-}
     do
-        resTyp <- M.freshMetaVar TypeConstraints
-        (val', valTyp) <- infer val
+        resTyp <- freshMetaTypeVar scope
+        (val', valTyp) <- infer val scope
         expectedValTyp <-
-            M.freshMetaVar (CompositeConstraints (Set.singleton name))
+            freshMetaCompositeVar (Set.singleton name) scope
             <&> TCompositeExtend name resTyp
             <&> MetaTypeAST
             <&> TRecord <&> MetaTypeAST
@@ -211,51 +222,51 @@ inferGetField (Val.GetField val name) =
         return (Val.BGetField (Val.GetField val' name), resTyp)
 
 inferInject :: Val.Inject (AV a) -> InferAction s a
-inferInject (Val.Inject name val) =
+inferInject (Val.Inject name val) scope =
     {-# SCC "inferInject" #-}
     do
-        (val', valTyp) <- infer val
+        (val', valTyp) <- infer val scope
         typ <-
-            M.freshMetaVar (CompositeConstraints (Set.singleton name))
+            freshMetaCompositeVar (Set.singleton name) scope
             <&> TCompositeExtend name valTyp
             <&> MetaTypeAST
             <&> TSum <&> MetaTypeAST
         return (Val.BInject (Val.Inject name val'), typ)
 
 inferFromNom :: Val.Nom (AV a) -> InferAction s a
-inferFromNom (Val.Nom n val) =
+inferFromNom (Val.Nom n val) scope =
     do
-        (val', valTyp) <- infer val
+        (val', valTyp) <- infer val scope
         -- TODO: Optimization: give valTyp (which should be a TInst)
         -- directly to instantiateFromNom, which can directly work
         -- with the params instead of creating metavars and unifying
         -- with them immediately after
         (nomTypeParams, innerTyp) <-
-            M.lookupNominal n >>= InferNominal.instantiateFromNom n
+            M.lookupNominal n scope
+            >>= InferNominal.instantiateFromNom (Scope.skolemScope scope) n
         let tInstType = TInst n nomTypeParams & MetaTypeAST
         unifyType tInstType valTyp
         return (Val.BFromNom (Val.Nom n val'), innerTyp)
 
 inferToNom :: Val.Nom (AV a) -> InferAction s a
-inferToNom (Val.Nom n val) =
+inferToNom (Val.Nom n val) scope =
     do
         (nomTypeParams, (innerBinders, innerTyp)) <-
-            M.lookupNominal n >>= InferNominal.instantiateToNom n
-        val' <-
-            do
-                (val', valTyp) <- infer val
-                unifyType innerTyp valTyp
-                return val'
-            & M.withSkolemScope innerBinders
+            M.lookupNominal n scope
+            >>= InferNominal.instantiateToNom (Scope.skolemScope scope) n
+        scope' <- M.extendSkolemScope innerBinders scope
+        (val', valTyp) <- infer val scope'
+        unifyType innerTyp valTyp
         let typ =
                 TInst n nomTypeParams
                 & MetaTypeAST
         return (Val.BToNom (Val.Nom n val'), typ)
 
-infer :: AV a -> Infer s (AV (Payload, a), MetaType)
-infer (AV pl val) =
+infer :: AV a -> Scope ->Infer s (AV (Payload, a), MetaType)
+infer (AV pl val) scope =
     {-# SCC "infer" #-}
-    case val of
+    scope
+    & case val of
     Val.BLeaf x      -> inferLeaf x
     Val.BLam x       -> inferLam x
     Val.BApp x       -> inferApp x
@@ -265,14 +276,11 @@ infer (AV pl val) =
     Val.BFromNom x   -> inferFromNom x
     Val.BToNom x     -> inferToNom x
     Val.BCase x      -> inferCase x
-    >>= annotate
+    <&> annotate
     where
-        annotate (val', typ) =
-            do
-                scope <- M.askScope
-                return (AV (Payload typ scope, pl) val', typ)
+        annotate (val', typ) = (AV (Payload typ scope, pl) val', typ)
 
-inferScheme :: AV a -> M.Infer s (AV (Payload, a), Scheme 'TypeT)
-inferScheme x =
+inferScheme :: AV a -> Scope -> M.Infer s (AV (Payload, a), Scheme 'TypeT)
+inferScheme x scope =
     {-# SCC "inferScheme" #-}
-    infer x >>= Deref.run . inline _2 Deref.generalize
+    infer x scope >>= Deref.run . inline _2 Deref.generalize

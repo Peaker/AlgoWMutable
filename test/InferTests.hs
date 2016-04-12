@@ -46,9 +46,10 @@ resumeTest (val, resumptions) =
     {-# SCC "resumeTest" #-}
     do
         (av, topTyp) <-
-            runInfer (InferErr 0, pPrint val) Vals.env $ Infer.infer val <&> _1 . Lens.mapped %~ fst
+            runInfer (InferErr 0, pPrint val) $
+            Infer.infer val Vals.env <&> _1 . Lens.mapped %~ fst
         topScheme <-
-            runInfer (DerefErr 0, pPrint topTyp) Vals.env $ Deref.run $ Deref.generalize topTyp
+            runInfer (DerefErr 0, pPrint topTyp) $ Deref.run $ Deref.generalize topTyp
         let topLevelDoc =
                 pPrint val <+?> "::" <+> pPrint topScheme
                 $+$ pPrint (av <&> (^. Infer.plType))
@@ -60,11 +61,11 @@ resumeTest (val, resumptions) =
         resume av topTyp (i, (injectPos, injectVal)) =
             do
                 injectTyp <-
-                    runInfer (InferErr i, pPrint injectVal) posScope $ Infer.infer injectVal <&> snd
-                runInfer (UnifyInjectErr i, pPrint injectTyp <+> pPrint posTyp) posScope $
+                    runInfer (InferErr i, pPrint injectVal) $ Infer.infer injectVal posScope <&> snd
+                runInfer (UnifyInjectErr i, pPrint injectTyp <+> pPrint posTyp) $
                     Infer.unifyType injectTyp posTyp
                 (injectTypD, topScheme) <-
-                    runInfer (DerefErr i, pPrint injectTyp <+> "," <+> pPrint topTyp) Vals.env $
+                    runInfer (DerefErr i, pPrint injectTyp <+> "," <+> pPrint topTyp) $
                     Deref.run $ (,) <$> Deref.deref injectTyp <*> Deref.generalize topTyp
                 pPrint injectVal <+> "::" <+> pPrint injectTypD
                     $+$ "top-level becomes: " <> pPrint topScheme
@@ -75,9 +76,9 @@ resumeTest (val, resumptions) =
         pPrintErr ((resErr, doc), inferErr) =
             pPrint resErr <> ":" <+> doc <> ":" <+> pPrint inferErr
         runInfer ::
-            ann -> Infer.Scope -> (forall s. Infer s a) ->
+            ann -> (forall s. Infer s a) ->
             StateT Infer.Context (Either (ann, Infer.Err)) a
-        runInfer errAnn scope act = annotateErr errAnn $ Infer.runInfer scope act
+        runInfer errAnn act = annotateErr errAnn $ Infer.runInfer act
 
 test :: AV () -> Doc
 test x =
@@ -89,8 +90,8 @@ test x =
     where
         res =
             (`evalStateT` Infer.emptyContext) $
-            Infer.runInfer Vals.env $
-            Infer.infer x
+            Infer.runInfer $
+            Infer.infer x Vals.env
             & Deref.liftInfer
             >>= _2 Deref.generalize
             >>= (_1 . traverse) (deref . (^. Infer.plType) . fst)
