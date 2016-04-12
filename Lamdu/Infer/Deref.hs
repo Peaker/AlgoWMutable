@@ -37,10 +37,10 @@ import           Prelude.Compat
 
 type DerefCache = (RefMap (T 'TypeT), RefMap (T RecordT), RefMap (T SumT))
 data DerefEnv s = DerefEnv
-    { _derefEnvVisited :: RefSet
-    , derefEnvCache :: STRef s DerefCache
-    , derefEnvBinders :: STRef s SchemeBinders
-    , derefEnvInfer :: M.Env s
+    { _derefEnvVisited :: !RefSet
+    , derefEnvCache :: {-# UNPACK #-}!(STRef s DerefCache)
+    , derefEnvBinders :: {-# UNPACK #-}!(STRef s SchemeBinders)
+    , derefEnvInfer :: !(M.Env s)
     }
 type Deref s = M.InferEnv (DerefEnv s) s
 
