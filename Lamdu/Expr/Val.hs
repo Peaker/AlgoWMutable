@@ -7,11 +7,12 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Lamdu.Expr.Val
-    ( Val(..)
+    ( Leaf(..)
+      , _LVar, _LEmptyRecord, _LAbsurd, _LLiteral, _LHole
+    , PrimVal(..), primType, primData
+    , Val(..)
       , _BLam, _BApp, _BRecExtend, _BCase, _BGetField
       , _BInject, _BFromNom, _BToNom, _BLeaf
-    , Leaf(..)
-      , _LVar, _LEmptyRecord, _LAbsurd, _LInt, _LHole
     , Abs(..), lamParamId, lamResult
     , Var(..), var
     , App(..), applyFunc, applyArg
@@ -24,25 +25,37 @@ module Lamdu.Expr.Val
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
+import           Data.ByteString (ByteString)
+import           Data.ByteString.Hex (showHexBytes)
 import           Data.String (IsString)
 import           Lamdu.Expr.Identifier (Identifier, Tag, NominalId)
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
-import           Text.PrettyPrint (($+$), (<+>), (<>))
+import           Text.PrettyPrint (text, ($+$), (<+>), (<>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import           Prelude.Compat
 
+data PrimVal = PrimVal
+    { _primType :: {-# UNPACK #-} !NominalId
+    , _primData :: {-# UNPACK #-} !ByteString
+    } deriving (Show, Eq, Ord)
+instance NFData PrimVal where
+    rnf (PrimVal a b) = rnf a `seq` rnf b
+
+instance Pretty PrimVal where
+    pPrint (PrimVal nomId bs) = pPrint nomId <> "{" <> text (showHexBytes bs) <> "}"
+
 data Leaf
-    = LVar Var
+    = LVar {-# UNPACK #-}!Var
     | LEmptyRecord
     | LAbsurd
-    | LInt Int
+    | LLiteral {-# UNPACK #-}!PrimVal
     | LHole
     deriving (Show)
 instance NFData Leaf where
     rnf (LVar x) = rnf x
-    rnf (LInt x) = rnf x
+    rnf (LLiteral x) = rnf x
     rnf LEmptyRecord = ()
     rnf LAbsurd = ()
     rnf LHole = ()
@@ -51,7 +64,7 @@ instance Pretty Leaf where
     pPrint (LVar x) = pPrint x
     pPrint LEmptyRecord = "{}"
     pPrint LAbsurd = "Absurd"
-    pPrint (LInt x) = pPrint x
+    pPrint (LLiteral x) = pPrint x
     pPrint LHole = "?"
 
 newtype Var = Var { _var :: Identifier }
@@ -156,6 +169,7 @@ instance Pretty v => Pretty (Val v) where
     pPrintPrec level prec (BLeaf leaf) = pPrintPrec level prec leaf
 
 Lens.makeLenses ''Var
+Lens.makeLenses ''PrimVal
 Lens.makeLenses ''Abs
 Lens.makeLenses ''Inject
 Lens.makeLenses ''GetField

@@ -12,7 +12,7 @@ module Lamdu.Expr.Val.Annotated
 
     , lam, lambda, lambdaRecord
     , absurd, case_, cases
-    , litInt, hole
+    , litNum, hole
     , ($$), ($$:), ($=), ($.), (.$), ($+), ($-)
     , recVal, var, infixApp
     , fromNom, toNom
@@ -20,6 +20,7 @@ module Lamdu.Expr.Val.Annotated
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
+import           Data.Binary.Utils (encodeS)
 import           Lamdu.Expr.Identifier (Tag(..), NominalId)
 import           Lamdu.Expr.Val (Val(..))
 import qualified Lamdu.Expr.Val as V
@@ -73,8 +74,8 @@ case_ name handler restHandlers = AV mempty $ V.BCase $ V.Case name handler rest
 cases :: Monoid a => [(Tag, AV a)] -> AV a
 cases = foldr (uncurry case_) absurd
 
-litInt :: Monoid a => Int -> AV a
-litInt = AV mempty . V.BLeaf . V.LInt
+litNum :: Monoid a => Double -> AV a
+litNum = AV mempty . V.BLeaf . V.LLiteral . V.PrimVal "Num" . encodeS
 
 hole :: Monoid a => AV a
 hole = AV mempty $ V.BLeaf V.LHole

@@ -28,7 +28,7 @@ import           Data.Typeable (Typeable)
 import           GHC.Exts (inline)
 import           GHC.Generics (Generic)
 import           Lamdu.Expr.Identifier (Tag)
-import           Lamdu.Expr.Type (Type, AST(..))
+import           Lamdu.Expr.Type (AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Scheme (Scheme)
 import           Lamdu.Expr.Type.Tag (IsCompositeTag(..), ASTTag(..))
@@ -58,9 +58,6 @@ Lens.makeLenses ''Payload
 
 type InferAction s a = Infer s (Val (AV (Payload, a)), MetaType)
 
-int :: Type ast
-int = TInst "Int" Map.empty
-
 inferLeaf :: Val.Leaf -> InferAction s a
 inferLeaf leaf =
     {-# SCC "inferLeaf" #-}
@@ -74,9 +71,9 @@ inferLeaf leaf =
             res <- M.freshMetaVar TypeConstraints
             let emptySum = MetaTypeAST TEmptyComposite & TSum & MetaTypeAST
             TFun emptySum res & MetaTypeAST & return
-    Val.LInt _ ->
-        {-# SCC "inferInt" #-}
-        MetaTypeAST int & return
+    Val.LLiteral (Val.PrimVal nomId _) ->
+        {-# SCC "inferLiteral" #-}
+        MetaTypeAST (TInst nomId Map.empty) & return
     Val.LHole ->
         {-# SCC "inferHole" #-}
         M.freshMetaVar TypeConstraints

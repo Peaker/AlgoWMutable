@@ -98,8 +98,8 @@ tests =
       g $$ (f $$ "Just" .$ x)
         $$ (f $$ "Nothing" .$ AV.recVal [])
     , AV.cases
-      [ ("Nothing", AV.lam "_" (AV.litInt 0))
-      , ("Just", AV.lambda "x" $ \x -> AV.litInt 1 $+ x)
+      [ ("Nothing", AV.lam "_" (AV.litNum 0))
+      , ("Just", AV.lambda "x" $ \x -> AV.litNum 1 $+ x)
       ]
     , AV.lambda "f" $ \f ->
       AV.lambda "x" $ \x ->
@@ -115,7 +115,7 @@ tests =
     , AV.var "runST" $$ AV.hole
     , AV.fromNom (fst Vals.closedStTypePair) AV.hole
     , AV.toNom (fst Vals.closedStTypePair) AV.hole
-    , AV.toNom (fst Vals.closedStTypePair) (AV.litInt 1)
+    , AV.toNom (fst Vals.closedStTypePair) (AV.litNum 1)
     , AV.lambda "x" $ AV.toNom (fst Vals.closedStTypePair)
     ]
 

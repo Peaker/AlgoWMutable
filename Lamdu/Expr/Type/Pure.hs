@@ -7,12 +7,10 @@
 module Lamdu.Expr.Type.Pure
     ( T(..)
     , recordType, compositeFrom, (~>), tInst
-    , intType, boolType
     ) where
 
 import           Control.DeepSeq (NFData(..))
 import           Data.Map (Map)
-import qualified Data.Map as Map
 import           Lamdu.Expr.Identifier (Tag, NominalId, TParamId)
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..))
@@ -40,10 +38,4 @@ recordType = T . Type.TRecord . compositeFrom
 
 tInst :: NominalId -> Map (TParamId 'TypeT) (T 'TypeT) -> T 'TypeT
 tInst name params = T $ Type.TInst name params
-
-intType :: T 'TypeT
-intType = tInst "Int" Map.empty
-
-boolType :: T 'TypeT
-boolType = tInst "Bool" Map.empty
 

@@ -63,6 +63,30 @@ pRecord = p . TRecord . pComposite
 pSum :: [(Tag, ParameterizedType 'TypeT)] -> ParameterizedType 'TypeT
 pSum = p . TSum . pComposite
 
+boolTypePair :: (NominalId, Nominal)
+boolTypePair =
+    ( "Bool"
+    , Nominal
+      { nParams = mempty
+      , nType =
+        pSum
+        [ ("True", pRecord [])
+        , ("False", pRecord [])
+        ]
+        & NominalScheme mempty
+        & NominalType
+      }
+    )
+
+numTypePair :: (NominalId, Nominal)
+numTypePair =
+    ( "Num"
+    , Nominal
+      { nParams = mempty
+      , nType = OpaqueNominal
+      }
+    )
+
 listTypePair :: (NominalId, Nominal)
 listTypePair =
     ( "List"
@@ -221,6 +245,12 @@ closedStOf = T.tInst "ClosedST" . Map.singleton "elem"
 infixArgs :: V -> V -> V
 infixArgs l r = V.recVal [("l", l), ("r", r)]
 
+numType :: T 'TypeT
+numType = T.tInst (fst numTypePair) mempty
+
+boolType :: T 'TypeT
+boolType = T.tInst (fst boolTypePair) mempty
+
 env :: Scope
 env = Scope.newScope nominals globals
     where
@@ -238,21 +268,21 @@ env = Scope.newScope nominals globals
             ]
         globals = Map.fromList
             [ ("fix",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> (a ~> a) ~> a)
-            , ("if",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("condition", T.boolType), ("then", a), ("else", a)] ~> a)
-            , ("==",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
-            , (">",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a T.boolType)
+            , ("if",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("condition", boolType), ("then", a), ("else", a)] ~> a)
+            , ("==",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a boolType)
+            , (">",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a boolType)
             , ("%",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
             , ("*",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
             , ("-",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
             , ("+",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
             , ("/",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> infixType a a a)
 
-            , ("bool'",  Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.boolType ~> a ~> a ~> a)
-            , ("eq",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> T.boolType)
+            , ("bool'",  Scheme.forAll 1 0 0 $ \ [a] [] [] -> boolType ~> a ~> a ~> a)
+            , ("eq",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> boolType)
             , ("mul",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
             , ("sub",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
 
-            , ("//",     Scheme.forAll 0 0 0 $ \ []  [] [] -> infixType T.intType T.intType T.intType)
+            , ("//",     Scheme.forAll 0 0 0 $ \ []  [] [] -> infixType numType numType numType)
             -- , ("sum",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
             -- , ("filter", Scheme.forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
             , (":",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("head", a), ("tail", listOf a)] ~> listOf a)
@@ -260,7 +290,7 @@ env = Scope.newScope nominals globals
             , ("concat", Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf (listOf a) ~> listOf a)
             , ("map",    Scheme.forAll 2 0 0 $ \ [a, b] [] [] -> T.recordType [("list", listOf a), ("mapping", a ~> b)] ~> listOf b)
             -- , ("..",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType intType intType (listOf intType))
-            , ("||",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType T.boolType T.boolType T.boolType)
+            , ("||",     Scheme.forAll 0 0 0 $ \ [] [] [] -> infixType boolType boolType boolType)
             , ("head",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
             , ("negate", Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
             , ("sqrt",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a)
@@ -270,7 +300,7 @@ env = Scope.newScope nominals globals
             -- , ("Just",   Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> maybeOf a)
             -- , ("Nothing",Scheme.forAll 1 0 0 $ \ [a] [] [] -> maybeOf a)
             -- , ("maybe",  Scheme.forAll ["a", "b"] $ \ [a, b] [] [] -> b ~> (a ~> b) ~> maybeOf a ~> b)
-            , ("plus1",  Scheme.forAll 0 0 0 $ \ [] [] [] -> T.intType ~> T.intType)
+            , ("plus1",  Scheme.forAll 0 0 0 $ \ [] [] [] -> numType ~> numType)
             -- , ("True",   Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
             -- , ("False",  Scheme.forAll 0 0 0 $ \ [] [] [] -> boolType)
 
@@ -291,10 +321,10 @@ factorialVal =
         V.lambda "x" $ \x ->
         V.var "if" $$:
         [ ( "condition", V.var "==" $$
-                infixArgs x (V.litInt 0) )
-        , ( "then", V.litInt 1 )
+                infixArgs x (V.litNum 0) )
+        , ( "then", V.litNum 1 )
         , ( "else", V.var "*" $$
-                infixArgs x (loop $$ (V.var "-" $$ infixArgs x (V.litInt 1)))
+                infixArgs x (loop $$ (V.var "-" $$ infixArgs x (V.litNum 1)))
             )
         ]
     )
@@ -306,10 +336,10 @@ factorialValNoRecords =
     ( \loop ->
         V.lambda "x" $ \x ->
         V.var "bool'" $$
-        (V.var "eq" $$ x $$ V.litInt 0) $$
-        V.litInt 1 $$
+        (V.var "eq" $$ x $$ V.litNum 0) $$
+        V.litNum 1 $$
         (V.var "mul" $$ x $$
-         (loop $$ (V.var "sub" $$ x $$ V.litInt 1)))
+         (loop $$ (V.var "sub" $$ x $$ V.litNum 1)))
     )
 
 euler1Val :: V
@@ -318,15 +348,15 @@ euler1Val =
     ( V.var "filter" $$:
         [ ( "from"
           , V.var ".." $$
-            infixArgs (V.litInt 1) (V.litInt 1000)
+            infixArgs (V.litNum 1) (V.litNum 1000)
           )
         , ( "predicate",
             V.lambda "x" $ \x ->
             V.var "||" $$ infixArgs
             ( V.var "==" $$ infixArgs
-              (V.litInt 0) (V.var "%" $$ infixArgs x (V.litInt 3)) )
+              (V.litNum 0) (V.var "%" $$ infixArgs x (V.litNum 3)) )
             ( V.var "==" $$ infixArgs
-              (V.litInt 0) (V.var "%" $$ infixArgs x (V.litInt 5)) )
+              (V.litNum 0) (V.var "%" $$ infixArgs x (V.litNum 5)) )
           )
         ]
     )
@@ -345,11 +375,11 @@ solveDepressedQuarticVal =
     )
     $ \sqrts ->
     V.var "if" $$:
-    [ ("condition", V.var "==" $$ infixArgs d (V.litInt 0))
+    [ ("condition", V.var "==" $$ infixArgs d (V.litNum 0))
     , ( "then"
       , V.var "concat" $$
         ( V.var "map" $$:
-          [ ("list", solvePoly $$ list [e, c, V.litInt 1])
+          [ ("list", solvePoly $$ list [e, c, V.litNum 1])
           , ("mapping", sqrts)
           ]
         )
@@ -362,9 +392,9 @@ solveDepressedQuarticVal =
               ( V.var "head" $$
                 ( solvePoly $$ list
                   [ V.var "negate" $$ (d %* d)
-                  , (c %* c) %- (V.litInt 4 %* e)
-                  , V.litInt 2 %* c
-                  , V.litInt 1
+                  , (c %* c) %- (V.litNum 4 %* e)
+                  , V.litNum 2 %* c
+                  , V.litNum 1
                   ]
                 )
               )
@@ -373,8 +403,8 @@ solveDepressedQuarticVal =
             , V.lambda "x" $ \x ->
               solvePoly $$ list
               [ (c %+ (x %* x)) %- (d %/ x)
-              , V.litInt 2 %* x
-              , V.litInt 2
+              , V.litNum 2 %* x
+              , V.litNum 2
               ]
             )
           ]
