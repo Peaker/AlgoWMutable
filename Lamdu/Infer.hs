@@ -14,7 +14,7 @@ module Lamdu.Infer
     , M.runInfer
     , M.Err(..)
 
-    , MetaType, M.generalize, M.deref, M.runDeref
+    , MetaType
     ) where
 
 import qualified Control.Lens as Lens
@@ -38,6 +38,7 @@ import           Lamdu.Expr.Val.Annotated (AV(..))
 import           Lamdu.Infer.Meta
 import           Lamdu.Infer.Monad (Infer)
 import qualified Lamdu.Infer.Monad as M
+import qualified Lamdu.Infer.Deref as Deref
 import qualified Lamdu.Infer.Nominal as InferNominal
 import           Lamdu.Infer.Scope (Scope)
 import qualified Lamdu.Infer.Scope as Scope
@@ -277,4 +278,4 @@ infer (AV pl val) =
 inferScheme :: AV a -> M.Infer s (AV (Payload, a), Scheme 'TypeT)
 inferScheme x =
     {-# SCC "inferScheme" #-}
-    infer x >>= inline _2 M.generalize
+    infer x >>= inline _2 Deref.generalize

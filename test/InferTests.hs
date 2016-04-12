@@ -19,6 +19,8 @@ import           Lamdu.Expr.Type.Tag (ASTTag(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Lamdu.Expr.Val.Annotated as AV
+import           Lamdu.Infer.Deref (deref)
+import qualified Lamdu.Infer.Deref as Deref
 import           Lamdu.Infer (Infer)
 import qualified Lamdu.Infer as Infer
 import           Pretty.Map ()
@@ -54,17 +56,17 @@ resumeTest val injectPos injectVal =
             do
                 injectTyp <- Infer.infer injectVal <&> snd
                 Infer.unifyType injectTyp $ ann ^. Infer.plType
-                Infer.runDeref $ Infer.deref injectTyp
+                Deref.run $ deref injectTyp
             where
                 ann = av ^# Lens.cloneLens injectPos . AV.annotation . _1
         res =
             runInfer Infer.emptyContext Vals.env $
             Infer.infer val
             <&> _1 . Lens.mapped %~ fst
-            >>= _2 Infer.generalize
-            >>= Infer.runDeref . (_1 . traverse) derefDup
+            >>= _2 Deref.generalize
+            >>= Deref.run . (_1 . traverse) derefDup
             where
-                derefDup pl = Infer.deref (pl ^. Infer.plType) <&> (,) pl
+                derefDup pl = deref (pl ^. Infer.plType) <&> (,) pl
 
 test :: AV () -> Doc
 test x =
@@ -78,8 +80,8 @@ test x =
             (`evalStateT` Infer.emptyContext) $
             Infer.runInfer Vals.env $
             Infer.infer x
-            >>= _2 Infer.generalize
-            >>= Infer.runDeref . (_1 . traverse) (Infer.deref . (^. Infer.plType) . fst)
+            >>= _2 Deref.generalize
+            >>= Deref.run . (_1 . traverse) (deref . (^. Infer.plType) . fst)
 
 tests :: [AV ()]
 tests =
