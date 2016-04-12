@@ -31,34 +31,47 @@ import           Prelude.Compat
 
 type InjectPos = ALens' (AV Infer.Payload) (AV Infer.Payload)
 
-data ResumptionErr = InferErr | InjectInferErr | UnifyInjectErr | DerefErr
+data ResumptionErr = InferErr Int | DerefErr Int | UnifyInjectErr Int
     deriving (Eq, Ord, Show)
 instance Pretty ResumptionErr where pPrint = text . show
 
 annotateErr :: ann -> StateT s (Either e) a -> StateT s (Either (ann, e)) a
 annotateErr ann = mapStateT (Lens._Left %~ (,) ann)
 
-resumeTest :: AV () -> InjectPos -> AV () -> Doc
-resumeTest val injectPos injectVal =
+type Resumption = (InjectPos, AV ())
+type ResumeTest = (AV (), [Resumption])
+
+resumeTest :: ResumeTest -> Doc
+resumeTest (val, resumptions) =
     {-# SCC "resumeTest" #-}
     do
         (av, topTyp) <-
-            runInfer (InferErr, pPrint val) Vals.env $ Infer.infer val <&> _1 . Lens.mapped %~ fst
-        let Infer.Payload posTyp posScope = av ^# Lens.cloneLens injectPos . AV.annotation
-        injectTyp <-
-            runInfer (InjectInferErr, pPrint injectVal) posScope $ Infer.infer injectVal <&> snd
-        runInfer (UnifyInjectErr, pPrint injectTyp <+> pPrint posTyp) posScope $
-            Infer.unifyType injectTyp posTyp
-        (injectTypD, topScheme) <-
-            runInfer (DerefErr, pPrint injectTyp <+> "," <+> pPrint topTyp) Vals.env $
-            Deref.run $ (,) <$> Deref.deref injectTyp <*> Deref.generalize topTyp
-        pPrint val <+?> "::" <+> pPrint topScheme
-            $+$ pPrint (av <&> (^. Infer.plType))
-            $+$ pPrint injectVal <+> "::" <+> pPrint injectTypD
-            & return
+            runInfer (InferErr 0, pPrint val) Vals.env $ Infer.infer val <&> _1 . Lens.mapped %~ fst
+        topScheme <-
+            runInfer (DerefErr 0, pPrint topTyp) Vals.env $ Deref.run $ Deref.generalize topTyp
+        let topLevelDoc =
+                pPrint val <+?> "::" <+> pPrint topScheme
+                $+$ pPrint (av <&> (^. Infer.plType))
+        docs <- zip [1..] resumptions & traverse (resume av topTyp)
+        vcat (topLevelDoc : docs) & return
     & (`evalStateT` Infer.emptyContext)
     & either pPrintErr id
     where
+        resume av topTyp (i, (injectPos, injectVal)) =
+            do
+                injectTyp <-
+                    runInfer (InferErr i, pPrint injectVal) posScope $ Infer.infer injectVal <&> snd
+                runInfer (UnifyInjectErr i, pPrint injectTyp <+> pPrint posTyp) posScope $
+                    Infer.unifyType injectTyp posTyp
+                (injectTypD, topScheme) <-
+                    runInfer (DerefErr i, pPrint injectTyp <+> "," <+> pPrint topTyp) Vals.env $
+                    Deref.run $ (,) <$> Deref.deref injectTyp <*> Deref.generalize topTyp
+                pPrint injectVal <+> "::" <+> pPrint injectTypD
+                    $+$ "top-level becomes: " <> pPrint topScheme
+                    & return
+            where
+                Infer.Payload posTyp posScope =
+                    av ^# Lens.cloneLens injectPos . AV.annotation
         pPrintErr ((resErr, doc), inferErr) =
             pPrint resErr <> ":" <+> doc <> ":" <+> pPrint inferErr
         runInfer ::
@@ -122,19 +135,40 @@ tests =
 testsDoc :: Doc
 testsDoc = vcat $ map test tests
 
-resumeTests :: [(AV (), InjectPos, AV ())]
+lamRes :: Lens.Traversal' (AV a) (AV a)
+lamRes = AV.val . Val._BLam . Val.lamResult
+
+appArg :: Lens.Traversal' (AV a) (AV a)
+appArg = AV.val . Val._BApp . Val.applyArg
+
+appFunc :: Lens.Traversal' (AV a) (AV a)
+appFunc = AV.val . Val._BApp . Val.applyFunc
+
+resumeTests :: [ResumeTest]
 resumeTests =
     [ ( AV.lam "x" AV.hole
-      , AV.val . Val._BLam . Val.lamResult & Lens.unsafeSingular
-      , AV.var "x"
+      , [ (lamRes & Lens.unsafeSingular, AV.var "x")
+        ]
+      )
+    , let inLambdas = lamRes . lamRes . lamRes . lamRes
+      in
+      ( AV.lambda "f" $ \f ->
+        AV.lambda "g" $ \g ->
+        AV.lambda "a" $ \a ->
+        AV.lambda "b" $ \_b ->
+        f $$ (g $$ a $$ a) $$ (g $$ AV.hole $$ AV.hole)
+      , [ ( inLambdas . appArg . appArg & Lens.unsafeSingular
+          , AV.litNum 1
+          )
+        , ( inLambdas . appArg . appFunc . appArg & Lens.unsafeSingular
+          , AV.var "b"
+          )
+        ]
       )
     ]
 
 resumeTestsDoc :: Doc
-resumeTestsDoc =
-    vcat $ map f resumeTests
-    where
-        f (val, injectPos, injectVal) = resumeTest val injectPos injectVal
+resumeTestsDoc = vcat $ map resumeTest resumeTests
 
 main :: IO ()
 main =
