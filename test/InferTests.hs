@@ -13,9 +13,7 @@ import           Control.Lens (ALens')
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
 import           Control.Lens.Tuple
-import           Control.Monad.State.Strict (StateT(..), evalStateT)
-import           Lamdu.Expr.Type.Pure (T)
-import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import           Control.Monad.State.Strict (StateT(..), evalStateT, mapStateT)
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..), ($$), (.$), ($.), ($=), ($+), ($-))
 import qualified Lamdu.Expr.Val.Annotated as AV
@@ -26,47 +24,47 @@ import qualified Lamdu.Infer as Infer
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
 import qualified TestVals as Vals
-import           Text.PrettyPrint (vcat, Doc, (<+>), ($+$))
+import           Text.PrettyPrint (vcat, Doc, (<>), (<+>), ($+$), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
 
-type InjectPos = ALens' (AV (Infer.Payload, T 'TypeT)) (AV (Infer.Payload, T 'TypeT))
+type InjectPos = ALens' (AV Infer.Payload) (AV Infer.Payload)
+
+data ResumptionErr = InferErr | InjectInferErr | UnifyInjectErr | DerefErr
+    deriving (Eq, Ord, Show)
+instance Pretty ResumptionErr where pPrint = text . show
+
+annotateErr :: ann -> StateT s (Either e) a -> StateT s (Either (ann, e)) a
+annotateErr ann = mapStateT (Lens._Left %~ (,) ann)
 
 resumeTest :: AV () -> InjectPos -> AV () -> Doc
 resumeTest val injectPos injectVal =
     {-# SCC "resumeTest" #-}
-    case res of
-    Left err -> pPrint val <+?> "causes type error:" <+> pPrint err
-    Right ((av, scheme), context) ->
-        vcat
-        [ pPrint val <+?> " :: " <+> pPrint scheme $+$ pPrint (av <&> snd)
-        , inject context av & Lens._Right %~ fst & pPrint
-        ]
+    do
+        (av, topTyp) <-
+            runInfer (InferErr, pPrint val) Vals.env $ Infer.infer val <&> _1 . Lens.mapped %~ fst
+        let Infer.Payload posTyp posScope = av ^# Lens.cloneLens injectPos . AV.annotation
+        injectTyp <-
+            runInfer (InjectInferErr, pPrint injectVal) posScope $ Infer.infer injectVal <&> snd
+        runInfer (UnifyInjectErr, pPrint injectTyp <+> pPrint posTyp) posScope $
+            Infer.unifyType injectTyp posTyp
+        (injectTypD, topScheme) <-
+            runInfer (DerefErr, pPrint injectTyp <+> "," <+> pPrint topTyp) Vals.env $
+            Deref.run $ (,) <$> Deref.deref injectTyp <*> Deref.generalize topTyp
+        pPrint val <+?> "::" <+> pPrint topScheme
+            $+$ pPrint (av <&> (^. Infer.plType))
+            $+$ pPrint injectVal <+> "::" <+> pPrint injectTypD
+            & return
+    & (`evalStateT` Infer.emptyContext)
+    & either pPrintErr id
     where
+        pPrintErr ((resErr, doc), inferErr) =
+            pPrint resErr <> ":" <+> doc <> ":" <+> pPrint inferErr
         runInfer ::
-            Infer.Context -> Infer.Scope -> (forall s. Infer s a) ->
-            Either Infer.Err (a, Infer.Context)
-        runInfer ctx scope act = runStateT (Infer.runInfer scope act) ctx
-        inject ::
-            Infer.Context -> AV (Infer.Payload, T 'TypeT) ->
-            Either Infer.Err (T 'TypeT, Infer.Context)
-        inject ctx av =
-            runInfer ctx (ann ^. Infer.plScope) $
-            do
-                injectTyp <- Infer.infer injectVal <&> snd
-                Infer.unifyType injectTyp $ ann ^. Infer.plType
-                Deref.run $ deref injectTyp
-            where
-                ann = av ^# Lens.cloneLens injectPos . AV.annotation . _1
-        res =
-            runInfer Infer.emptyContext Vals.env $
-            Infer.infer val
-            <&> _1 . Lens.mapped %~ fst
-            >>= _2 Deref.generalize
-            >>= Deref.run . (_1 . traverse) derefDup
-            where
-                derefDup pl = deref (pl ^. Infer.plType) <&> (,) pl
+            ann -> Infer.Scope -> (forall s. Infer s a) ->
+            StateT Infer.Context (Either (ann, Infer.Err)) a
+        runInfer errAnn scope act = annotateErr errAnn $ Infer.runInfer scope act
 
 test :: AV () -> Doc
 test x =
@@ -80,8 +78,10 @@ test x =
             (`evalStateT` Infer.emptyContext) $
             Infer.runInfer Vals.env $
             Infer.infer x
+            & Deref.liftInfer
             >>= _2 Deref.generalize
-            >>= Deref.run . (_1 . traverse) (deref . (^. Infer.plType) . fst)
+            >>= (_1 . traverse) (deref . (^. Infer.plType) . fst)
+            & Deref.run
 
 tests :: [AV ()]
 tests =

@@ -275,4 +275,4 @@ infer (AV pl val) =
 inferScheme :: AV a -> M.Infer s (AV (Payload, a), Scheme 'TypeT)
 inferScheme x =
     {-# SCC "inferScheme" #-}
-    infer x >>= inline _2 Deref.generalize
+    infer x >>= Deref.run . inline _2 Deref.generalize

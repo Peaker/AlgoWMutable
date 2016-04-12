@@ -1,5 +1,6 @@
 -- | Dereference meta-asts
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
@@ -7,7 +8,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Lamdu.Infer.Deref
-    ( Deref, run
+    ( Deref, run, liftInfer
     , deref, generalize
     ) where
 
@@ -35,7 +36,9 @@ import qualified Lamdu.Infer.Monad as M
 
 import           Prelude.Compat
 
-type DerefCache = (RefMap (T 'TypeT), RefMap (T RecordT), RefMap (T SumT))
+type CacheOf tag = RefMap (SchemeBinders, T tag)
+
+type DerefCache = (CacheOf 'TypeT, CacheOf RecordT, CacheOf SumT)
 data DerefEnv s = DerefEnv
     { _derefEnvVisited :: !RefSet
     , derefEnvCache :: {-# UNPACK #-}!(STRef s DerefCache)
@@ -46,10 +49,12 @@ type Deref s = M.InferEnv (DerefEnv s) s
 
 Lens.makeLenses ''DerefEnv
 
-derefInfer :: M.Infer s a -> Deref s a
-derefInfer = M.localEnv derefEnvInfer
+liftInfer :: M.Infer s a -> Deref s a
+liftInfer = M.localEnv derefEnvInfer
 
-derefCache :: forall tag. IsTag tag => RefZone.Ref (Link tag) -> Lens' DerefCache (Maybe (T tag))
+derefCache ::
+    forall tag. IsTag tag =>
+    RefZone.Ref (Link tag) -> Lens' DerefCache (Maybe (SchemeBinders, T tag))
 derefCache tag =
     ( case (tagRefl :: ASTTagEquality tag) of
       IsTypeT                -> _1
@@ -57,24 +62,37 @@ derefCache tag =
       IsCompositeT IsSumC    -> _3
     ) . RefMap.at tag
 
+listenBinders :: Deref s a -> Deref s (SchemeBinders, a)
+listenBinders act =
+    do
+        DerefEnv{derefEnvBinders} <- M.askEnv
+        oldBinders <- readSTRef derefEnvBinders & M.liftST
+        writeSTRef derefEnvBinders mempty & M.liftST
+        res <- act
+        newBinders <- readSTRef derefEnvBinders & M.liftST
+        modifySTRef derefEnvBinders (mappend oldBinders) & M.liftST
+        return (newBinders, res)
+
 derefMemoize ::
     IsTag tag => RefZone.Ref (Link tag) -> Deref s (T tag) -> Deref s (T tag)
 derefMemoize ref act =
     do
-        cacheRef <- M.askEnv <&> derefEnvCache
-        M.liftST (readSTRef cacheRef) <&> (^. derefCache ref)
+        DerefEnv{derefEnvCache,derefEnvBinders} <- M.askEnv
+        M.liftST (readSTRef derefEnvCache) <&> (^. derefCache ref)
             >>= \case
-            Just t -> pure t
+            Just (binders, t) ->
+                t <$ modifySTRef derefEnvBinders (mappend binders) & M.liftST
             Nothing ->
                 do
-                    res <- act
-                    derefCache ref ?~ res & modifySTRef cacheRef & M.liftST
+                    (binders, res) <- listenBinders act
+                    derefCache ref ?~ (binders,res)
+                        & modifySTRef derefEnvCache & M.liftST
                     return res
 
 derefVar :: IsTag tag => MetaVar tag -> Deref s (T tag)
 derefVar var =
     do
-        (ref, final) <- M.repr var & derefInfer
+        (ref, final) <- M.repr var & liftInfer
         visited <- M.askEnv <&> _derefEnvVisited
         when (ref `RefSet.isMember` visited) $ M.throwError M.InfiniteType
         derefMemoize ref $
@@ -82,7 +100,7 @@ derefVar var =
             Bound ast -> derefAST ast & M.localEnv (derefEnvVisited %~ RefSet.insert ref)
             Unbound info ->
                 do
-                    tvName <- derefInfer M.freshTVarName
+                    tvName <- liftInfer M.freshTVarName
                     M.askEnv
                         <&> derefEnvBinders
                         >>= M.liftST . flip modifySTRef
@@ -97,24 +115,18 @@ deref = \case
 derefAST :: IsTag tag => Type.AST tag MetaTypeAST -> Deref s (T tag)
 derefAST = fmap T . Type.ntraverse deref deref deref
 
-runWith :: Deref s a -> M.Infer s (SchemeBinders, a)
-runWith act =
+run :: Deref s a -> M.Infer s a
+run act =
     do
         cacheRef <- newSTRef mempty & M.liftST
         bindersRef <- newSTRef mempty & M.liftST
-        res <- M.localEnv (DerefEnv mempty cacheRef bindersRef) act
-        binders <- readSTRef bindersRef & M.liftST
-        return (binders, res)
-
-{-# INLINE run #-}
-run :: Deref s a -> M.Infer s a
-run = fmap snd . runWith
+        M.localEnv (DerefEnv mempty cacheRef bindersRef) act
 
 -- | Convert a meta-type's meta-variables to a scheme with quantified
 -- variables
-generalize :: IsTag tag => MetaTypeAST tag -> M.Infer s (Scheme tag)
+generalize :: IsTag tag => MetaTypeAST tag -> Deref s (Scheme tag)
 generalize t =
     {-# SCC "generalize" #-}
     do
-        (binders, typ) <- deref t & runWith
+        (binders, typ) <- deref t & listenBinders
         Scheme binders typ & return
