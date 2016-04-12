@@ -130,8 +130,8 @@ newtype ZonedInferResult a b = ZonedInferResult (Either Err (a, b))
     deriving (Functor, Foldable, Traversable)
 
 data Context = Context
-    { _inferFresh :: !Int
-    , _inferFrozen :: !RefZone.Frozen
+    { _inferFresh :: {-# UNPACK #-}!Int
+    , _inferFrozen :: {-# UNPACK #-}!RefZone.Frozen
     }
 
 emptyContext :: Context
