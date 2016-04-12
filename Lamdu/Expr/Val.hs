@@ -10,7 +10,7 @@ module Lamdu.Expr.Val
     ( Leaf(..)
       , _LVar, _LEmptyRecord, _LAbsurd, _LLiteral, _LHole
     , PrimVal(..), primType, primData
-    , Val(..)
+    , Body(..)
       , _BLam, _BApp, _BRecExtend, _BCase, _BGetField
       , _BInject, _BFromNom, _BToNom, _BLeaf
     , Abs(..), lamParamId, lamResult
@@ -114,7 +114,7 @@ data Nom v = Nom
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Nom v) where rnf (Nom a b) = rnf a `seq` rnf b
 
-data Val v
+data Body v
     = BLam (Abs v)
     | BApp (App v)
     | BRecExtend (RecExtend v)
@@ -126,7 +126,7 @@ data Val v
     | BLeaf Leaf
     deriving (Show, Functor, Foldable, Traversable)
 
-instance NFData v => NFData (Val v) where
+instance NFData v => NFData (Body v) where
     rnf (BLam x) = rnf x
     rnf (BApp x) = rnf x
     rnf (BRecExtend x) = rnf x
@@ -137,7 +137,7 @@ instance NFData v => NFData (Val v) where
     rnf (BInject x) = rnf x
     rnf (BLeaf x) = rnf x
 
-instance Pretty v => Pretty (Val v) where
+instance Pretty v => Pretty (Body v) where
     pPrintPrec level prec (BLam (Abs name body)) =
         maybeParens (prec > 0) $
         pPrint name <+> "→" <+> pPrintPrec level 0 body
@@ -178,4 +178,4 @@ Lens.makeLenses ''Nom
 Lens.makeLenses ''RecExtend
 Lens.makeLenses ''Case
 Lens.makePrisms ''Leaf
-Lens.makePrisms ''Val
+Lens.makePrisms ''Body

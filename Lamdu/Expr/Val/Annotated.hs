@@ -22,7 +22,7 @@ import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import           Data.Binary.Utils (encodeS)
 import           Lamdu.Expr.Identifier (Tag(..), NominalId)
-import           Lamdu.Expr.Val (Val(..))
+import           Lamdu.Expr.Val (Body(..))
 import qualified Lamdu.Expr.Val as V
 import           Pretty.Map ()
 import           Text.PrettyPrint (isEmpty, (<>))
@@ -32,7 +32,7 @@ import           Prelude.Compat
 
 data AV a = AV
     { _annotation :: a
-    , _val :: Val (AV a)
+    , _val :: Body (AV a)
     } deriving (Show, Functor, Foldable, Traversable)
 instance Pretty a => Pretty (AV a) where
     pPrintPrec level prec (AV ann v)

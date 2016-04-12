@@ -32,7 +32,7 @@ import           Lamdu.Expr.Type (AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Scheme (Scheme)
 import           Lamdu.Expr.Type.Tag (IsCompositeTag(..), ASTTag(..))
-import           Lamdu.Expr.Val (Val(..))
+import           Lamdu.Expr.Val (Body(..))
 import qualified Lamdu.Expr.Val as Val
 import           Lamdu.Expr.Val.Annotated (AV(..))
 import           Lamdu.Infer.Meta
@@ -56,7 +56,7 @@ data Payload = Payload
 
 Lens.makeLenses ''Payload
 
-type InferAction s a = Infer s (Val (AV (Payload, a)), MetaType)
+type InferAction s a = Infer s (Body (AV (Payload, a)), MetaType)
 
 inferLeaf :: Val.Leaf -> InferAction s a
 inferLeaf leaf =
