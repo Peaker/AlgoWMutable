@@ -35,8 +35,8 @@ instantiateFromNom = nonOpaque (instantiate M.freshMetaVar)
 -- ToNom Monad:
 
 data MEnv s = MEnv
-    { mEnvBinders :: STRef s SchemeBinders
-    , mEnvInfer :: M.Env s
+    { mEnvBinders :: {-# UNPACK #-}!(STRef s SchemeBinders)
+    , mEnvInfer :: !(M.Env s)
     }
 
 type M s a = M.InferEnv (MEnv s) s a
