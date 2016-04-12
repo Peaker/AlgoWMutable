@@ -25,8 +25,8 @@ toBox :: a -> Box
 toBox = unsafeCoerce
 
 data Zone s = Zone
-    { _zoneSizeRef :: !(STRef s Int) -- vector grows beyond this
-    , zoneVectorRef :: !(STRef s (MV.STVector s Box))
+    { _zoneSizeRef  :: {-# UNPACK #-}!(STRef s Int) -- vector grows beyond this
+    , zoneVectorRef :: {-# UNPACK #-}!(STRef s (MV.STVector s Box))
     }
 instance NFData (Zone s) where rnf (Zone s v) = s `seq` v `seq` ()
 
