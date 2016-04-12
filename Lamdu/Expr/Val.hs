@@ -30,6 +30,9 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import           Prelude.Compat
 
+newtype Var = Var { _var :: Identifier }
+    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
+
 data PrimVal = PrimVal
     { _primType :: {-# UNPACK #-} !NominalId
     , _primData :: {-# UNPACK #-} !ByteString
@@ -61,27 +64,36 @@ instance Pretty Leaf where
     pPrint (LLiteral x) = pPrint x
     pPrint LHole = "?"
 
-newtype Var = Var { _var :: Identifier }
-    deriving (Eq, Ord, Show, NFData, IsString, Pretty)
-
-data Lam v = Lam
-    { _lamParamId :: Var
-    , _lamResult :: !v
-    } deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (Lam v) where rnf (Lam a b) = rnf a `seq` rnf b
+class Match f where
+    match :: (a -> b -> c) -> f a -> f b -> Maybe (f c)
 
 data Apply v = Apply
     { _applyFunc :: !v
     , _applyArg :: !v
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Apply v) where rnf (Apply a b) = rnf a `seq` rnf b
+instance Match Apply where
+    match f (Apply f0 a0) (Apply f1 a1) = Just $ Apply (f f0 f1) (f a0 a1)
 
-data RecExtend v = RecExtend
-    { _recTag :: Tag
-    , _recFieldVal :: !v
-    , _recRest :: !v
+data GetField v = GetField
+    { _getFieldRecord :: !v
+    , _getFieldTag :: Tag
     } deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (RecExtend v) where rnf (RecExtend a b c) = rnf a `seq` rnf b `seq` rnf c
+instance NFData v => NFData (GetField v) where rnf (GetField a b) = rnf a `seq` rnf b
+instance Match GetField where
+    match f (GetField r0 t0) (GetField r1 t1)
+        | t0 == t1 = Just $ GetField (f r0 r1) t0
+        | otherwise = Nothing
+
+data Inject v = Inject
+    { _injectTag :: Tag
+    , _injectVal :: !v
+    } deriving (Show, Functor, Foldable, Traversable)
+instance NFData v => NFData (Inject v) where rnf (Inject a b) = rnf a `seq` rnf b
+instance Match Inject where
+    match f (Inject t0 r0) (Inject t1 r1)
+        | t0 == t1 = Just $ Inject t0 (f r0 r1)
+        | otherwise = Nothing
 
 data Case v = Case
     { _caseTag :: Tag
@@ -89,24 +101,37 @@ data Case v = Case
     , _caseMismatch :: !v
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Case v) where rnf (Case a b c) = rnf a `seq` rnf b `seq` rnf c
+instance Match Case where
+    match f (Case t0 h0 hr0) (Case t1 h1 hr1)
+        | t0 == t1 = Just $ Case t0 (f h0 h1) (f hr0 hr1)
+        | otherwise = Nothing
 
-data GetField v = GetField
-    { _getFieldRecord :: !v
-    , _getFieldTag :: Tag
+data Lam v = Lam
+    { _lamParamId :: Var
+    , _lamResult :: !v
     } deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (GetField v) where rnf (GetField a b) = rnf a `seq` rnf b
+instance NFData v => NFData (Lam v) where rnf (Lam a b) = rnf a `seq` rnf b
 
-data Inject v = Inject
-    { _injectTag :: Tag
-    , _injectVal :: !v
+data RecExtend v = RecExtend
+    { _recTag :: Tag
+    , _recFieldVal :: !v
+    , _recRest :: !v
     } deriving (Show, Functor, Foldable, Traversable)
-instance NFData v => NFData (Inject v) where rnf (Inject a b) = rnf a `seq` rnf b
+instance NFData v => NFData (RecExtend v) where rnf (RecExtend a b c) = rnf a `seq` rnf b `seq` rnf c
+instance Match RecExtend where
+    match f (RecExtend t0 f0 r0) (RecExtend t1 f1 r1)
+        | t0 == t1 = Just $ RecExtend t0 (f f0 f1) (f r0 r1)
+        | otherwise = Nothing
 
 data Nom v = Nom
     { _nomId :: NominalId
     , _nomVal :: !v
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Nom v) where rnf (Nom a b) = rnf a `seq` rnf b
+instance Match Nom where
+    match f (Nom i0 v0) (Nom i1 v1)
+        | i0 == i1 = Just $ Nom i0 (f v0 v1)
+        | otherwise = Nothing
 
 data Body v
     = BLam (Lam v)
