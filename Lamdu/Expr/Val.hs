@@ -77,7 +77,7 @@ instance Match Apply where
 
 data GetField v = GetField
     { _getFieldRecord :: !v
-    , _getFieldTag :: Tag
+    , _getFieldTag :: {-# UNPACK #-}!Tag
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (GetField v) where rnf (GetField a b) = rnf a `seq` rnf b
 instance Match GetField where
@@ -86,7 +86,7 @@ instance Match GetField where
         | otherwise = Nothing
 
 data Inject v = Inject
-    { _injectTag :: Tag
+    { _injectTag :: {-# UNPACK #-}!Tag
     , _injectVal :: !v
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Inject v) where rnf (Inject a b) = rnf a `seq` rnf b
@@ -96,7 +96,7 @@ instance Match Inject where
         | otherwise = Nothing
 
 data Case v = Case
-    { _caseTag :: Tag
+    { _caseTag :: {-# UNPACK #-}!Tag
     , _caseMatch :: !v
     , _caseMismatch :: !v
     } deriving (Show, Functor, Foldable, Traversable)
@@ -107,13 +107,13 @@ instance Match Case where
         | otherwise = Nothing
 
 data Lam v = Lam
-    { _lamParamId :: Var
+    { _lamParamId :: {-# UNPACK #-}!Var
     , _lamResult :: !v
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Lam v) where rnf (Lam a b) = rnf a `seq` rnf b
 
 data RecExtend v = RecExtend
-    { _recTag :: Tag
+    { _recTag :: {-# UNPACK #-}!Tag
     , _recFieldVal :: !v
     , _recRest :: !v
     } deriving (Show, Functor, Foldable, Traversable)
@@ -124,7 +124,7 @@ instance Match RecExtend where
         | otherwise = Nothing
 
 data Nom v = Nom
-    { _nomId :: NominalId
+    { _nomId :: {-# UNPACK #-}!NominalId
     , _nomVal :: !v
     } deriving (Show, Functor, Foldable, Traversable)
 instance NFData v => NFData (Nom v) where rnf (Nom a b) = rnf a `seq` rnf b
