@@ -19,8 +19,8 @@ import           Prelude.Compat
 
 -- TODO: Replace with ordinary ADT when ParamRef is allowed anywhere
 data ParameterizedType tag where
-    ParameterizedType :: Type.AST tag ParameterizedType -> ParameterizedType tag
-    ParamRef :: TParamId 'TypeT -> ParameterizedType 'TypeT
+    ParameterizedType :: !(Type.AST tag ParameterizedType) -> ParameterizedType tag
+    ParamRef :: {-# UNPACK #-}!(TParamId 'TypeT) -> ParameterizedType 'TypeT
 instance NFData (ParameterizedType tag) where
     rnf (ParameterizedType ast) = rnf ast
     rnf (ParamRef paramId) = rnf paramId
