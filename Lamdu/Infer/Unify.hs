@@ -125,7 +125,7 @@ data UnifyActions tag s = UnifyActions
 
 data UnifyEnv tag s = UnifyEnv
     { envActions :: {-# UNPACK #-}!(UnifyActions tag s)
-    , envInfer :: M.Env s
+    , envInfer :: !(M.Env s)
     }
 
 type Unify tag s = M.InferEnv (UnifyEnv tag s) s
