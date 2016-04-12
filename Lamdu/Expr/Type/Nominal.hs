@@ -26,8 +26,8 @@ instance NFData (ParameterizedType tag) where
     rnf (ParamRef paramId) = rnf paramId
 
 data NominalScheme = NominalScheme
-    { nominalSchemeBinders :: SchemeBinders
-    , nominalSchemeType :: ParameterizedType 'TypeT
+    { nominalSchemeBinders :: {-# UNPACK #-}!SchemeBinders
+    , nominalSchemeType :: !(ParameterizedType 'TypeT)
     }
 instance NFData NominalScheme where
     rnf (NominalScheme a b) = rnf a `seq` rnf b
