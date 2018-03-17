@@ -18,9 +18,11 @@ module Lamdu.Infer.Meta
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import qualified Data.RefZone as RefZone
+import           Data.Semigroup (Semigroup)
+import qualified Data.Semigroup as Semigroup
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
-import           Lamdu.Expr.Type.Tag (ASTTag(..))
+import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..))
 import           Lamdu.Infer.Scope.Skolems (SkolemScope)
 import           Text.PrettyPrint ((<>), (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
@@ -36,12 +38,15 @@ instance Pretty (MetaVarInfo tag) where
     pPrint (MetaVarInfo constraints skolems) =
         "Info{" <> pPrint constraints <> pPrint skolems <> "}"
 
-instance Monoid (Constraints tag) => Monoid (MetaVarInfo tag) where
+instance IsTag tag => Semigroup (MetaVarInfo tag) where
+    {-# INLINE (<>) #-}
+    MetaVarInfo x0 y0 <> MetaVarInfo x1 y1 =
+        MetaVarInfo (x0 Semigroup.<> x1) (y0 Semigroup.<> y1)
+
+instance IsTag tag => Monoid (MetaVarInfo tag) where
     {-# INLINE mempty #-}
     mempty = MetaVarInfo mempty mempty
-    {-# INLINE mappend #-}
-    mappend (MetaVarInfo x0 y0) (MetaVarInfo x1 y1) =
-        MetaVarInfo (mappend x0 x1) (mappend y0 y1)
+    mappend = (Semigroup.<>)
 
 data Final tag
     = Unbound (MetaVarInfo tag)
@@ -68,7 +73,7 @@ data MetaTypeAST tag
 instance NFData (MetaTypeAST tag) where
     rnf (MetaTypeVar x) = rnf x
     rnf (MetaTypeAST x) = rnf x
-instance Pretty (Type.AST tag MetaTypeAST) => Pretty (MetaTypeAST tag) where
+instance Pretty (MetaTypeAST tag) where
     pPrint (MetaTypeVar pos) = pPrint pos
     pPrint (MetaTypeAST t) = pPrint t
 

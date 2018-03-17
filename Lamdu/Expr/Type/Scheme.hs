@@ -17,6 +17,8 @@ import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
+import           Data.Semigroup (Semigroup)
+import qualified Data.Semigroup as Semigroup
 import qualified Data.Set as Set
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
@@ -46,9 +48,8 @@ data SchemeBinders = SchemeBinders
     }
 instance NFData SchemeBinders where
     rnf (SchemeBinders x y z) = rnf x `seq` rnf y `seq` rnf z
-instance Monoid SchemeBinders where
-    mempty = SchemeBinders IntMap.empty IntMap.empty IntMap.empty
-    mappend (SchemeBinders t0 r0 s0) (SchemeBinders t1 r1 s1) =
+instance Semigroup SchemeBinders where
+    SchemeBinders t0 r0 s0 <> SchemeBinders t1 r1 s1 =
         SchemeBinders
         (IntMap.unionWith assertSameConstraints t0 t1)
         (IntMap.unionWith assertSameConstraints r0 r1)
@@ -60,6 +61,9 @@ instance Monoid SchemeBinders where
                   "Differing constraints of same " ++
                   "unification variable encountered"
                   & error
+instance Monoid SchemeBinders where
+    mempty = SchemeBinders IntMap.empty IntMap.empty IntMap.empty
+    mappend = (Semigroup.<>)
 
 nullBinders :: SchemeBinders -> Bool
 nullBinders (SchemeBinders a b c) = IntMap.null a && IntMap.null b && IntMap.null c

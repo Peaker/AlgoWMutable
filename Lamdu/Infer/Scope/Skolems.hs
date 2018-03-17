@@ -5,14 +5,16 @@ module Lamdu.Infer.Scope.Skolems
     , SkolemScope(..), new
     ) where
 
-import Control.DeepSeq (NFData(..))
-import Control.Lens.Operators
-import Data.Maybe (fromMaybe)
-import Lamdu.Expr.Type.Scheme (SchemeBinders)
-import Text.PrettyPrint (text, (<>))
-import Text.PrettyPrint.HughesPJClass (Pretty(..))
+import           Control.DeepSeq (NFData(..))
+import           Control.Lens.Operators
+import           Data.Maybe (fromMaybe)
+import           Data.Semigroup (Semigroup)
+import qualified Data.Semigroup as Semigroup
+import           Lamdu.Expr.Type.Scheme (SchemeBinders)
+import           Text.PrettyPrint (text, (<>))
+import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
-import Prelude.Compat
+import           Prelude.Compat
 
 newtype SkolemScopeId = SkolemScopeId Int
    deriving (Eq, Ord, Show, NFData)
@@ -67,12 +69,12 @@ walkup destLevel =
               maybe (error "SkolemScope level invariants broken")
               go (skolemScopeParent scope)
 
-instance Monoid SkolemScope where
-    mempty = -- the root:
-        SkolemScope 0 (SkolemScopeId 0) Nothing mempty
-    mappend
-        s0@(SkolemScope level0 id0 _ _)
-        s1@(SkolemScope level1 id1 _ _)
+instance Semigroup SkolemScope where
+    s0@(SkolemScope level0 id0 _ _) <> s1@(SkolemScope level1 id1 _ _)
         | id0 == id1 = s0
         | level0 >= level1 = intersectSameLevel (walkup level1 s0) s1
         | otherwise = intersectSameLevel s0 (walkup level0 s1)
+instance Monoid SkolemScope where
+    mempty = -- the root:
+        SkolemScope 0 (SkolemScopeId 0) Nothing mempty
+    mappend = (Semigroup.<>)

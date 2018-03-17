@@ -154,7 +154,7 @@ infer :: M.Infer s a -> Unify tag s a
 infer = M.localEnv envInfer
 
 runUnify ::
-    Monoid (Constraints tag) => UnifyActions tag s -> Unify tag s a -> M.Infer s a
+    UnifyActions tag s -> Unify tag s a -> M.Infer s a
 runUnify actions act = M.localEnv (UnifyEnv actions) act
 
 unifyVarToAST :: Order -> MetaVar tag -> AST tag MetaTypeAST -> Unify tag s ()

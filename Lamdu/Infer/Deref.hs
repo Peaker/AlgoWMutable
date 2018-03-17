@@ -112,7 +112,7 @@ deref = \case
     MetaTypeAST ast -> derefAST ast
     MetaTypeVar var -> derefVar var
 
-derefAST :: IsTag tag => Type.AST tag MetaTypeAST -> Deref s (T tag)
+derefAST :: Type.AST tag MetaTypeAST -> Deref s (T tag)
 derefAST = fmap T . Type.ntraverse deref deref deref
 
 run :: Deref s a -> M.Infer s a

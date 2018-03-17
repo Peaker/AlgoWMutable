@@ -4,6 +4,8 @@ module Pretty.Utils
 
 import Text.PrettyPrint (Doc, text, punctuate, hcat, fcat, (<>))
 
+import Prelude
+
 infixr 2 <+?>
 (<+?>) :: Doc -> Doc -> Doc
 x <+?> y = fcat [x, text " " <> y]

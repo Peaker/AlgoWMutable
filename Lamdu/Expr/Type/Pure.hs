@@ -22,7 +22,7 @@ import           Prelude.Compat
 newtype T tag = T { unT :: Type.AST tag T }
 instance NFData (T tag) where rnf (T x) = rnf x
 
-instance Pretty (Type.AST tag T) => Pretty (T tag) where
+instance Pretty (T tag) where
     pPrintPrec level prec (T typ) = pPrintPrec level prec typ
 
 infixr 4 ~>

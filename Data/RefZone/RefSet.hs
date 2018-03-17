@@ -3,15 +3,16 @@ module Data.RefZone.RefSet
     ( RefSet, singleton, isMember, insert
     ) where
 
-import           Data.RefZone.Internal
 import           Control.Lens.Operators
 import           Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
+import           Data.RefZone.Internal
+import           Data.Semigroup (Semigroup)
 
 import           Prelude.Compat
 
 newtype RefSet = RefSet IntSet
-     deriving (Eq, Ord, Monoid)
+     deriving (Eq, Ord, Monoid, Semigroup)
 
 singleton :: Ref a -> RefSet
 singleton (Ref x) = IntSet.singleton x & RefSet
