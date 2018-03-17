@@ -10,7 +10,11 @@
 *.O2_o
 *.hi
 *.o
-benchmark
-benchmark.p
-benchmark.O1
-benchmark.O2
+.DS_Store
+/.tm_properties
+/TAGS
+/tags
+/dist/
+/.stack-work/
+/.ghci
+/ghci-out/
