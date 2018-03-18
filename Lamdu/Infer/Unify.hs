@@ -33,6 +33,7 @@ import           Lamdu.Expr.Identifier (Tag, TParamId)
 import           Lamdu.Expr.Type (Type, Composite, AST(..))
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
+import qualified Lamdu.Expr.Type.Constraints as Constraints
 import           Lamdu.Expr.Type.Scheme (schemeBindersLookup)
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsCompositeTag(..), IsTag(..))
 import           Lamdu.Infer.Meta
@@ -299,9 +300,10 @@ unifyComposite ::
 unifyComposite = unifyCompositeH Map.empty Map.empty
 
 enforceConstraints :: Set Tag -> Constraints ('CompositeT c) -> M.Infer s ()
-enforceConstraints tags (CompositeConstraints disallowed) =
+enforceConstraints tags (CompositeConstraints constraints) =
     unless (Set.null dups) $ M.throwError $ M.DuplicateFields $ Set.toList dups
     where
+        Constraints.Composite disallowed = constraints
         dups = disallowed `Set.intersection` tags
 
 unifyCompositeOpenToClosed ::

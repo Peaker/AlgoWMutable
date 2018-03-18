@@ -19,7 +19,6 @@ import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import           Data.Semigroup (Semigroup)
 import qualified Data.Semigroup as Semigroup
-import qualified Data.Set as Set
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Pure (T(..))
@@ -81,8 +80,7 @@ pPrintTV (tv, constraints) =
     where
         suffix :: Constraints tag -> Doc
         suffix TypeConstraints = ""
-        suffix (CompositeConstraints cs) =
-            "∉" <> (intercalate " " . map pPrint) (Set.toList cs)
+        suffix (CompositeConstraints cs) = pPrint cs
 
 instance Pretty SchemeBinders where
     pPrint (SchemeBinders tvs rtvs stvs) =

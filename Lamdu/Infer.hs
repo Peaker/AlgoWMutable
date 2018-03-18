@@ -31,6 +31,7 @@ import           GHC.Generics (Generic)
 import           Lamdu.Expr.Identifier (Tag)
 import           Lamdu.Expr.Type (AST(..))
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
+import qualified Lamdu.Expr.Type.Constraints as Constraints
 import           Lamdu.Expr.Type.Scheme (Scheme)
 import           Lamdu.Expr.Type.Tag (IsCompositeTag(..), ASTTag(..))
 import           Lamdu.Expr.Val (Body(..))
@@ -66,10 +67,10 @@ freshMetaTypeVar scope =
 
 freshMetaCompositeVar :: Set Tag -> Scope -> Infer s (MetaTypeAST ('CompositeT c))
 freshMetaCompositeVar forbidden scope =
-    MetaVarInfo
-    (CompositeConstraints forbidden)
-    (Scope.skolemScope scope)
+    MetaVarInfo constraints (Scope.skolemScope scope)
     & M.freshMetaVar
+    where
+        constraints = CompositeConstraints (Constraints.Composite forbidden)
 
 inferLeaf :: Val.Leaf -> InferAction s a
 inferLeaf leaf scope =
@@ -166,13 +167,16 @@ propagateConstraint tagName scope =
         (_, Bound ast) -> toBound ast
         (vRef, Unbound (MetaVarInfo (CompositeConstraints cs) skolemScope)) ->
             M.writeRef vRef $ LinkFinal $ Unbound $ MetaVarInfo
-            { metaVarConstraints = CompositeConstraints $ Set.insert tagName cs
+            { metaVarConstraints =
+                    cs
+                    & Constraints.forbiddenFields %~ Set.insert tagName
+                    & CompositeConstraints
             , metaVarSkolemScope = skolemScope
             }
     where
         toBound (TSkolem tv) =
             do
-                CompositeConstraints oldConstraints <-
+                CompositeConstraints (Constraints.Composite oldConstraints) <-
                     M.lookupSkolem tv (Scope.skolemScope scope)
                 unless (tagName `Set.member` oldConstraints) $
                     M.ConstraintUnavailable tagName ("in skolem" <+> pPrint tv)
