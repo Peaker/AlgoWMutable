@@ -11,10 +11,8 @@ module Lamdu.Expr.Type.Constraints
 import           Control.DeepSeq (NFData(..))
 import           Data.Semigroup (Semigroup(..))
 import           Data.Set (Set)
-import qualified Data.Set as Set
 import           Lamdu.Expr.Identifier (Tag)
 import           Lamdu.Expr.Type.Tag
-import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude
 
@@ -22,10 +20,6 @@ data Constraints tag where
     TypeConstraints :: Constraints 'TypeT
     -- forbidden field set:
     CompositeConstraints :: !(Set Tag) -> Constraints ('CompositeT c)
-
-instance Pretty (Constraints tag) where
-    pPrint TypeConstraints = "[Type]"
-    pPrint (CompositeConstraints cs) = pPrint (Set.toList cs)
 
 instance Eq (Constraints tag) where
     (==) a b =

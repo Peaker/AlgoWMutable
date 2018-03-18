@@ -24,7 +24,6 @@ import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..))
 import           Lamdu.Infer.Scope.Skolems (SkolemScope)
-import           Text.PrettyPrint ((<>), (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
@@ -33,10 +32,6 @@ data MetaVarInfo tag = MetaVarInfo
    { metaVarConstraints :: Constraints tag
    , metaVarSkolemScope :: SkolemScope
    }
-
-instance Pretty (MetaVarInfo tag) where
-    pPrint (MetaVarInfo constraints skolems) =
-        "Info{" <> pPrint constraints <> pPrint skolems <> "}"
 
 instance IsTag tag => Semigroup (MetaVarInfo tag) where
     {-# INLINE (<>) #-}
@@ -52,17 +47,9 @@ data Final tag
     = Unbound (MetaVarInfo tag)
     | Bound (Type.AST tag MetaTypeAST)
 
-instance Pretty (Final tag) where
-    pPrint (Unbound cs) = "(?" <> pPrint cs <> ")"
-    pPrint (Bound ast) = "(!" <> pPrint ast <> ")"
-
 data Link tag
     = LinkFinal (Final tag)
     | Link (MetaVar tag)
-
-instance Pretty (Link tag) where
-    pPrint (LinkFinal final) = "LinkFinal" <+> pPrint final
-    pPrint (Link var) = "Link" <+> pPrint var
 
 type MetaVar tag = RefZone.Ref (Link tag)
 
