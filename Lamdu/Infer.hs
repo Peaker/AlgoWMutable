@@ -266,7 +266,7 @@ inferToNom (Val.Nom n val) scope =
                 & MetaTypeAST
         return (Val.BToNom (Val.Nom n val'), typ)
 
-infer :: AV a -> Scope ->Infer s (AV (Payload, a), MetaType)
+infer :: AV a -> Scope -> Infer s (AV (Payload, a), MetaType)
 infer (AV pl val) scope =
     {-# SCC "infer" #-}
     scope
