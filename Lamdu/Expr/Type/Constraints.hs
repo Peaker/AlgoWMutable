@@ -40,15 +40,8 @@ instance Pretty (Composite c) where
         "∉" <> (intercalate " " . map pPrint) (Set.toList cs)
 
 instance Eq (Constraints tag) where
-    (==) a b =
-        case a of
-        TypeConstraints ->
-            case b :: Constraints 'TypeT of
-            TypeConstraints -> True
-        CompositeConstraints x ->
-            -- GADT exhaustiveness checking, ugh!
-            case b :: tag ~ 'CompositeT c => Constraints ('CompositeT c) of
-            CompositeConstraints y -> x == y
+    TypeConstraints == TypeConstraints = True
+    CompositeConstraints x == CompositeConstraints y = x == y
 
 instance NFData (Constraints tag) where
     rnf TypeConstraints = ()
