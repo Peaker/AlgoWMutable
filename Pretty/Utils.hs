@@ -1,10 +1,11 @@
+{-# LANGUAGE NoImplicitPrelude #-}
 module Pretty.Utils
     ( (<+?>), intercalate
     ) where
 
-import Text.PrettyPrint (Doc, text, punctuate, hcat, fcat, (<>))
+import Text.PrettyPrint (Doc, text, punctuate, hcat, fcat)
 
-import Prelude
+import Prelude.Compat
 
 infixr 2 <+?>
 (<+?>) :: Doc -> Doc -> Doc

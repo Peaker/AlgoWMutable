@@ -27,7 +27,7 @@ import qualified TestVals as Vals
 import           Text.PrettyPrint (vcat, Doc, (<>), (<+>), ($+$), text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
-import           Prelude.Compat
+import           Prelude.Compat hiding ((<>))
 
 type InjectPos = ALens' (AV Infer.Payload) (AV Infer.Payload)
 

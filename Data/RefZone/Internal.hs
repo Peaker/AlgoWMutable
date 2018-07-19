@@ -6,7 +6,7 @@ module Data.RefZone.Internal
     ) where
 
 import           Control.DeepSeq (NFData(..))
-import           Text.PrettyPrint (text, (<>))
+import           Text.PrettyPrint (text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat

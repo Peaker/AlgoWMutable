@@ -25,7 +25,7 @@ import           Data.String (IsString)
 import           Lamdu.Expr.Identifier (Identifier, Tag, NominalId)
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
-import           Text.PrettyPrint (text, ($+$), (<+>), (<>))
+import           Text.PrettyPrint (text, ($+$), (<+>))
 import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import           Prelude.Compat

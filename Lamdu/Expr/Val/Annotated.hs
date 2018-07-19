@@ -25,7 +25,7 @@ import           Lamdu.Expr.Identifier (Tag(..), NominalId)
 import           Lamdu.Expr.Val (Body(..))
 import qualified Lamdu.Expr.Val as V
 import           Pretty.Map ()
-import           Text.PrettyPrint (isEmpty, (<>))
+import           Text.PrettyPrint (isEmpty)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat

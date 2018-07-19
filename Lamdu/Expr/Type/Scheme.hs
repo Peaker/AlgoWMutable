@@ -27,7 +27,7 @@ import           Lamdu.Expr.Type.Tag
     , CompositeTagEquality(..) )
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>), intercalate)
-import           Text.PrettyPrint (Doc, (<>))
+import           Text.PrettyPrint (Doc)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
@@ -62,7 +62,7 @@ instance Semigroup SchemeBinders where
                   & error
 instance Monoid SchemeBinders where
     mempty = SchemeBinders IntMap.empty IntMap.empty IntMap.empty
-    mappend = (Semigroup.<>)
+    mappend = (<>)
 
 nullBinders :: SchemeBinders -> Bool
 nullBinders (SchemeBinders a b c) = IntMap.null a && IntMap.null b && IntMap.null c

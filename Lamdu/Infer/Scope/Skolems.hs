@@ -11,7 +11,7 @@ import           Data.Maybe (fromMaybe)
 import           Data.Semigroup (Semigroup)
 import qualified Data.Semigroup as Semigroup
 import           Lamdu.Expr.Type.Scheme (SchemeBinders)
-import           Text.PrettyPrint (text, (<>))
+import           Text.PrettyPrint (text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
 
 import           Prelude.Compat
