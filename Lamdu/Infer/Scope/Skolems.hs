@@ -8,8 +8,6 @@ module Lamdu.Infer.Scope.Skolems
 import           Control.DeepSeq (NFData(..))
 import           Control.Lens.Operators
 import           Data.Maybe (fromMaybe)
-import           Data.Semigroup (Semigroup)
-import qualified Data.Semigroup as Semigroup
 import           Lamdu.Expr.Type.Scheme (SchemeBinders)
 import           Text.PrettyPrint (text)
 import           Text.PrettyPrint.HughesPJClass (Pretty(..))
@@ -77,4 +75,4 @@ instance Semigroup SkolemScope where
 instance Monoid SkolemScope where
     mempty = -- the root:
         SkolemScope 0 (SkolemScopeId 0) Nothing mempty
-    mappend = (Semigroup.<>)
+    mappend = (<>)

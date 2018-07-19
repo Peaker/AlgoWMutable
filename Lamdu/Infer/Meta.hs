@@ -18,8 +18,6 @@ module Lamdu.Infer.Meta
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
 import qualified Data.RefZone as RefZone
-import           Data.Semigroup (Semigroup)
-import qualified Data.Semigroup as Semigroup
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints)
 import           Lamdu.Expr.Type.Tag (ASTTag(..), IsTag(..))
@@ -36,12 +34,12 @@ data MetaVarInfo tag = MetaVarInfo
 instance IsTag tag => Semigroup (MetaVarInfo tag) where
     {-# INLINE (<>) #-}
     MetaVarInfo x0 y0 <> MetaVarInfo x1 y1 =
-        MetaVarInfo (x0 Semigroup.<> x1) (y0 Semigroup.<> y1)
+        MetaVarInfo (x0 <> x1) (y0 <> y1)
 
 instance IsTag tag => Monoid (MetaVarInfo tag) where
     {-# INLINE mempty #-}
     mempty = MetaVarInfo mempty mempty
-    mappend = (Semigroup.<>)
+    mappend = (<>)
 
 data Final tag
     = Unbound (MetaVarInfo tag)

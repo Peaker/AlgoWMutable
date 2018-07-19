@@ -14,7 +14,6 @@ module Lamdu.Expr.Type.Constraints
 
 import           Control.DeepSeq (NFData(..))
 import qualified Control.Lens as Lens
-import           Data.Semigroup (Semigroup(..))
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Lamdu.Expr.Identifier (Tag)

@@ -8,7 +8,6 @@ import           Control.Lens (LensLike')
 import qualified Control.Lens as Lens
 import           Data.IntMap (IntMap)
 import           Data.RefZone.Internal
-import           Data.Semigroup (Semigroup)
 
 import           Prelude.Compat
 

@@ -7,7 +7,6 @@ import           Control.Lens.Operators
 import           Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import           Data.RefZone.Internal
-import           Data.Semigroup (Semigroup)
 
 import           Prelude.Compat
 

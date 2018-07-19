@@ -17,8 +17,6 @@ import           Control.Lens.Operators
 import           Control.Lens.Tuple
 import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import           Data.Semigroup (Semigroup)
-import qualified Data.Semigroup as Semigroup
 import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Pure (T(..))
