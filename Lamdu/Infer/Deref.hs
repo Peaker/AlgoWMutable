@@ -29,7 +29,7 @@ import           Lamdu.Expr.Type.Pure (T(..))
 import           Lamdu.Expr.Type.Scheme (Scheme(..), SchemeBinders(..), schemeBindersSingleton)
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), ASTTagEquality(..), IsTag(..)
-    , CompositeTagEquality(..), RecordT, SumT )
+    , CompositeTagEquality(..), RecordT, VariantT )
 import           Lamdu.Infer.Meta
     ( MetaVar, MetaTypeAST(..), Link(..), Final(..), MetaVarInfo(..) )
 import qualified Lamdu.Infer.Monad as M
@@ -38,7 +38,7 @@ import           Prelude.Compat
 
 type CacheOf tag = RefMap (SchemeBinders, T tag)
 
-type DerefCache = (CacheOf 'TypeT, CacheOf RecordT, CacheOf SumT)
+type DerefCache = (CacheOf 'TypeT, CacheOf RecordT, CacheOf VariantT)
 data DerefEnv s = DerefEnv
     { _derefEnvVisited :: !RefSet
     , derefEnvCache :: {-# UNPACK #-}!(STRef s DerefCache)
@@ -57,9 +57,9 @@ derefCache ::
     RefZone.Ref (Link tag) -> Lens' DerefCache (Maybe (SchemeBinders, T tag))
 derefCache tag =
     ( case (tagRefl :: ASTTagEquality tag) of
-      IsTypeT                -> _1
-      IsCompositeT IsRecordC -> _2
-      IsCompositeT IsSumC    -> _3
+      IsTypeT                 -> _1
+      IsCompositeT IsRecordC  -> _2
+      IsCompositeT IsVariantC -> _3
     ) . RefMap.at tag
 
 listenBinders :: Deref s a -> Deref s (SchemeBinders, a)

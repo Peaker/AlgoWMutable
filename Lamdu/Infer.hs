@@ -83,8 +83,8 @@ inferLeaf leaf scope =
         {-# SCC "inferAbsurd" #-}
         do
             res <- freshMetaTypeVar scope
-            let emptySum = MetaTypeAST TEmptyComposite & TSum & MetaTypeAST
-            TFun emptySum res & MetaTypeAST & return
+            let emptyVariant = MetaTypeAST TEmptyComposite & TVariant & MetaTypeAST
+            TFun emptyVariant res & MetaTypeAST & return
     Val.LLiteral (Val.PrimVal nomId _) ->
         {-# SCC "inferLiteral" #-}
         MetaTypeAST (TInst nomId Map.empty) & return
@@ -198,17 +198,17 @@ inferCase (Val.Case name handler restHandler) scope =
         (handler', handlerTyp) <- infer handler scope
         (restHandler', restHandlerTyp) <- infer restHandler scope
 
-        sumTail <- freshMetaCompositeVar (Set.singleton name) scope
+        variantTail <- freshMetaCompositeVar (Set.singleton name) scope
 
         let expectedHandlerTyp = toResType fieldType
         unifyType expectedHandlerTyp handlerTyp
 
-        let expectedRestHandlerType = TSum sumTail & MetaTypeAST & toResType
+        let expectedRestHandlerType = TVariant variantTail & MetaTypeAST & toResType
         unifyType expectedRestHandlerType restHandlerTyp
 
         let typ =
-                TCompositeExtend name fieldType sumTail
-                & MetaTypeAST & TSum & MetaTypeAST & toResType
+                TCompositeExtend name fieldType variantTail
+                & MetaTypeAST & TVariant & MetaTypeAST & toResType
         return (Val.BCase (Val.Case name handler' restHandler'), typ)
 
 inferGetField :: Val.GetField (AV a) -> InferAction s a
@@ -234,7 +234,7 @@ inferInject (Val.Inject name val) scope =
             freshMetaCompositeVar (Set.singleton name) scope
             <&> TCompositeExtend name valTyp
             <&> MetaTypeAST
-            <&> TSum <&> MetaTypeAST
+            <&> TVariant <&> MetaTypeAST
         return (Val.BInject (Val.Inject name val'), typ)
 
 inferFromNom :: Val.Nom (AV a) -> InferAction s a

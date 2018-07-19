@@ -23,7 +23,7 @@ import qualified Lamdu.Expr.Type as Type
 import           Lamdu.Expr.Type.Constraints (Constraints(..))
 import           Lamdu.Expr.Type.Pure (T(..))
 import           Lamdu.Expr.Type.Tag
-    ( IsTag(..), RecordT, SumT, ASTTag(..), ASTTagEquality(..)
+    ( IsTag(..), RecordT, VariantT, ASTTag(..), ASTTagEquality(..)
     , CompositeTagEquality(..) )
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>), intercalate)
@@ -43,7 +43,7 @@ tvarBindersFromList = IntMap.fromList . map (_1 %~ Type._tVarName)
 data SchemeBinders = SchemeBinders
     { schemeTypeBinders :: TVarBinders 'TypeT
     , schemeRecordBinders :: TVarBinders RecordT
-    , schemeSumBinders :: TVarBinders SumT
+    , schemeVariantBinders :: TVarBinders VariantT
     }
 instance NFData SchemeBinders where
     rnf (SchemeBinders x y z) = rnf x `seq` rnf y `seq` rnf z
@@ -96,7 +96,7 @@ instance Pretty (Type.AST tag T) => Pretty (Scheme tag) where
 
 forAll ::
     Int -> Int -> Int ->
-    ([T 'TypeT] -> [T RecordT] -> [T SumT] -> T tag) ->
+    ([T 'TypeT] -> [T RecordT] -> [T VariantT] -> T tag) ->
     Scheme tag
 forAll nTvs nRtvs nStvs mkType =
     Scheme (SchemeBinders cTvs cRtvs cStvs) $
@@ -119,7 +119,7 @@ schemeBindersSingleton (Type.TVarName tvName) cs =
     case tagRefl :: ASTTagEquality tag of
     IsTypeT -> mempty { schemeTypeBinders = binders }
     IsCompositeT IsRecordC -> mempty { schemeRecordBinders = binders }
-    IsCompositeT IsSumC -> mempty { schemeSumBinders = binders }
+    IsCompositeT IsVariantC -> mempty { schemeVariantBinders = binders }
     where
         binders = IntMap.singleton tvName cs
 
@@ -128,6 +128,6 @@ schemeBindersLookup ::
     Type.TVarName tag -> SchemeBinders -> Maybe (Constraints tag)
 schemeBindersLookup (Type.TVarName idx) =
     case tagRefl :: ASTTagEquality tag  of
-    IsTypeT                -> IntMap.lookup idx . schemeTypeBinders
-    IsCompositeT IsRecordC -> IntMap.lookup idx . schemeRecordBinders
-    IsCompositeT IsSumC    -> IntMap.lookup idx . schemeSumBinders
+    IsTypeT                 -> IntMap.lookup idx . schemeTypeBinders
+    IsCompositeT IsRecordC  -> IntMap.lookup idx . schemeRecordBinders
+    IsCompositeT IsVariantC -> IntMap.lookup idx . schemeVariantBinders

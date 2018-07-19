@@ -60,8 +60,8 @@ pComposite = foldr ((p .) . uncurry TCompositeExtend) (p TEmptyComposite)
 pRecord :: [(Tag, ParameterizedType 'TypeT)] -> ParameterizedType 'TypeT
 pRecord = p . TRecord . pComposite
 
-pSum :: [(Tag, ParameterizedType 'TypeT)] -> ParameterizedType 'TypeT
-pSum = p . TSum . pComposite
+pVariant :: [(Tag, ParameterizedType 'TypeT)] -> ParameterizedType 'TypeT
+pVariant = p . TVariant . pComposite
 
 boolTypePair :: (NominalId, Nominal)
 boolTypePair =
@@ -69,7 +69,7 @@ boolTypePair =
     , Nominal
       { nParams = mempty
       , nType =
-        pSum
+        pVariant
         [ ("True", pRecord [])
         , ("False", pRecord [])
         ]
@@ -93,7 +93,7 @@ listTypePair =
     , Nominal
       { nParams = Set.singleton "elem"
       , nType =
-        pSum
+        pVariant
         [ ("Empty", pRecord [])
         , ("NonEmpty" , pRecord [("head", tv), ("tail", p (TInst "List" (Map.singleton "elem" tv)))])
         ]
@@ -147,7 +147,7 @@ closedStOf = T.tInst "ClosedST" . Map.singleton "elem"
 --             CEmpty
 --             & CExtend "True" (recordType [])
 --             & CExtend "False" (recordType [])
---             & TSum
+--             & TVariant
 --             & Scheme.mono
 --         }
 --     )
@@ -237,7 +237,7 @@ closedStOf = T.tInst "ClosedST" . Map.singleton "elem"
 
 -- maybeOf :: TType -> TType
 -- maybeOf t =
---     TSum $
+--     TVariant $
 --     CExtend "Nothing" (recordType []) $
 --     CExtend "Just" t $
 --     CEmpty
@@ -283,7 +283,7 @@ env = Scope.newScope nominals globals
             , ("sub",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> a ~> a ~> a)
 
             , ("//",     Scheme.forAll 0 0 0 $ \ []  [] [] -> infixType numType numType numType)
-            -- , ("sum",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
+            -- , ("variant",    Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a ~> a)
             -- , ("filter", Scheme.forAll 1 0 0 $ \ [a] [] [] -> recordType [("from", listOf a), ("predicate", a ~> boolType)] ~> listOf a)
             , (":",      Scheme.forAll 1 0 0 $ \ [a] [] [] -> T.recordType [("head", a), ("tail", listOf a)] ~> listOf a)
             , ("[]",     Scheme.forAll 1 0 0 $ \ [a] [] [] -> listOf a)
@@ -344,7 +344,7 @@ factorialValNoRecords =
 
 euler1Val :: V
 euler1Val =
-    V.var "sum" $$
+    V.var "variant" $$
     ( V.var "filter" $$:
         [ ( "from"
           , V.var ".." $$

@@ -5,7 +5,7 @@
 module Lamdu.Expr.Type.Tag
     ( CompositeTag(..), CompositeTagEquality(..), IsCompositeTag(..)
     , RecordT
-    , SumT
+    , VariantT
     , ASTTag(..), ASTTagEquality(..), IsTag(..)
     ) where
 
@@ -14,14 +14,14 @@ import           Pretty.Map ()
 
 import           Prelude.Compat
 
-data CompositeTag = RecordC | SumC
+data CompositeTag = RecordC | VariantC
 data ASTTag = TypeT | CompositeT CompositeTag
 type RecordT = 'CompositeT 'RecordC
-type SumT = 'CompositeT 'SumC
+type VariantT = 'CompositeT 'VariantC
 
 data CompositeTagEquality c where
     IsRecordC :: CompositeTagEquality 'RecordC
-    IsSumC :: CompositeTagEquality 'SumC
+    IsVariantC :: CompositeTagEquality 'VariantC
 
 data ASTTagEquality t where
     IsTypeT :: ASTTagEquality 'TypeT
@@ -33,8 +33,8 @@ class IsCompositeTag t where
 instance IsCompositeTag 'RecordC where
     compositeTagRefl = IsRecordC
     compositeChar _ = '*'
-instance IsCompositeTag 'SumC where
-    compositeTagRefl = IsSumC
+instance IsCompositeTag 'VariantC where
+    compositeTagRefl = IsVariantC
     compositeChar _ = '+'
 
 class IsTag t where tagRefl :: ASTTagEquality t

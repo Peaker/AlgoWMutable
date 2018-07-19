@@ -13,7 +13,7 @@ module Lamdu.Expr.Type
     ( Type, Composite
     , TVarName(..)
     , AST(..)
-      , _TFun, _TInst, _TRecord, _TSum, _TSkolem
+      , _TFun, _TInst, _TRecord, _TVariant, _TSkolem
       , _TEmptyComposite, _TCompositeExtend
     , ntraverse, ntraverse_
     ) where
@@ -27,7 +27,7 @@ import           Data.Proxy (Proxy(..))
 import           Lamdu.Expr.Identifier (Tag, NominalId, TParamId)
 import           Lamdu.Expr.Type.Tag
     ( ASTTag(..), IsCompositeTag(..), CompositeTagEquality(..)
-    , RecordT, SumT )
+    , RecordT, VariantT )
 import           Pretty.Map ()
 import           Pretty.Utils ((<+?>))
 import           Text.PrettyPrint ((<+>), text)
@@ -47,7 +47,7 @@ data AST (tag :: ASTTag) ast where
     TFun :: !(ast 'TypeT) -> !(ast 'TypeT) -> AST 'TypeT ast
     TInst :: {-# UNPACK #-}!NominalId -> !(Map (TParamId 'TypeT) (ast 'TypeT)) -> AST 'TypeT ast
     TRecord :: !(ast RecordT) -> AST 'TypeT ast
-    TSum :: !(ast SumT) -> AST 'TypeT ast
+    TVariant :: !(ast VariantT) -> AST 'TypeT ast
     TEmptyComposite :: IsCompositeTag c => AST ('CompositeT c) ast
     TCompositeExtend ::
         IsCompositeTag c => {-# UNPACK #-}!Tag -> !(ast 'TypeT) ->
@@ -58,14 +58,14 @@ type Composite c = AST ('CompositeT c)
 
 instance (NFData (ast 'TypeT),
           NFData (ast RecordT),
-          NFData (ast SumT),
+          NFData (ast VariantT),
           NFData (ast tag)) =>
          NFData (AST tag ast) where
     rnf (TSkolem name) = rnf name
     rnf (TFun x y) = rnf x `seq` rnf y
     rnf (TInst n params) = rnf n `seq` rnf params
     rnf (TRecord record) = rnf record
-    rnf (TSum s) = rnf s
+    rnf (TVariant s) = rnf s
     rnf TEmptyComposite = ()
     rnf (TCompositeExtend n t r) = rnf n `seq` rnf t `seq` rnf r
 
@@ -74,40 +74,40 @@ ntraverse ::
     Applicative f =>
     (ast 'TypeT -> f (ast' 'TypeT)) ->
     (ast RecordT -> f (ast' RecordT)) ->
-    (ast SumT -> f (ast' SumT)) ->
+    (ast VariantT -> f (ast' VariantT)) ->
     AST tag ast -> f (AST tag ast')
-ntraverse onTypes onRecords onSums = \case
+ntraverse onTypes onRecords onVariants = \case
     TSkolem v -> pure (TSkolem v)
     TFun a b -> TFun <$> onTypes a <*> onTypes b
     TInst n params -> TInst n <$> traverse onTypes params
     TRecord r -> TRecord <$> onRecords r
-    TSum s -> TSum <$> onSums s
+    TVariant s -> TVariant <$> onVariants s
     TEmptyComposite -> pure TEmptyComposite
     TCompositeExtend n t (r :: ast ('CompositeT c)) ->
         TCompositeExtend n <$> onTypes t <*>
         case compositeTagRefl :: CompositeTagEquality c of
         IsRecordC -> onRecords r
-        IsSumC -> onSums r
+        IsVariantC -> onVariants r
 
 {-# INLINE ntraverse_ #-}
 ntraverse_ ::
     Applicative f =>
     (ast 'TypeT -> f ()) ->
     (ast RecordT -> f ()) ->
-    (ast SumT -> f ()) ->
+    (ast VariantT -> f ()) ->
     AST tag ast -> f ()
-ntraverse_ onTypes onRecords onSums = \case
+ntraverse_ onTypes onRecords onVariants = \case
     TSkolem _ -> pure ()
     TEmptyComposite -> pure ()
     TFun a b -> onTypes a *> onTypes b
     TInst _ params -> traverse_ onTypes params
     TRecord r -> onRecords r
-    TSum s -> onSums s
+    TVariant s -> onVariants s
     TCompositeExtend _ t (r :: ast ('CompositeT c)) ->
         onTypes t *>
         case compositeTagRefl :: CompositeTagEquality c of
         IsRecordC -> onRecords r
-        IsSumC -> onSums r
+        IsVariantC -> onVariants r
 
 {-# INLINE _TFun #-}
 _TFun :: Lens.Prism' (AST 'TypeT ast) (ast 'TypeT, ast 'TypeT)
@@ -133,10 +133,10 @@ _TRecord = Lens.prism' TRecord $ \case
     TRecord n -> Just n
     _ -> Nothing
 
-{-# INLINE _TSum #-}
-_TSum :: Lens.Prism' (Type ast) (ast SumT)
-_TSum = Lens.prism' TSum $ \case
-    TSum n -> Just n
+{-# INLINE _TVariant #-}
+_TVariant :: Lens.Prism' (Type ast) (ast VariantT)
+_TVariant = Lens.prism' TVariant $ \case
+    TVariant n -> Just n
     _ -> Nothing
 
 {-# INLINE _TEmptyComposite #-}
@@ -156,7 +156,7 @@ _TCompositeExtend = Lens.prism' (\(n, t, r) -> TCompositeExtend n t r) $ \case
 
 instance (Pretty (ast 'TypeT),
           Pretty (ast RecordT),
-          Pretty (ast SumT)) =>
+          Pretty (ast VariantT)) =>
          Pretty (AST tag ast) where
     pPrintPrec level prec ast =
         case ast of
@@ -169,7 +169,7 @@ instance (Pretty (ast 'TypeT),
             | Map.null params -> pPrint name
             | otherwise -> pPrint name <+> pPrint params
         TRecord r -> pPrintPrec level prec r
-        TSum s -> pPrintPrec level prec s
+        TVariant s -> pPrintPrec level prec s
         TEmptyComposite -> "{}"
         TCompositeExtend n t (r :: ast ('CompositeT c)) ->
             maybeParens (prec > 1) $
@@ -177,4 +177,4 @@ instance (Pretty (ast 'TypeT),
             text [compositeChar (Proxy :: Proxy c)] <+>
             ( case compositeTagRefl :: CompositeTagEquality c of
               IsRecordC -> pPrintPrec level 1 r
-              IsSumC    -> pPrintPrec level 1 r )
+              IsVariantC    -> pPrintPrec level 1 r )

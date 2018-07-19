@@ -92,10 +92,10 @@ unifyTypeAST (TRecord uRec) vTyp =
     do
         vRec <- unifyMatch "TRecord" vTyp Type._TRecord
         unifyComposite uRec vRec
-unifyTypeAST (TSum uSum) vTyp =
+unifyTypeAST (TVariant uVariant) vTyp =
     do
-        vSum <- unifyMatch "TSum" vTyp Type._TSum
-        unifyComposite uSum vSum
+        vVariant <- unifyMatch "TVariant" vTyp Type._TVariant
+        unifyComposite uVariant vVariant
 unifyTypeAST (TFun uArg uRes) vTyp =
     do
         (vArg, vRes) <- unifyMatch "TFun" vTyp Type._TFun

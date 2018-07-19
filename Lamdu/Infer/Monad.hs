@@ -238,24 +238,24 @@ instantiateBinders ::
     forall m f tag. (Monad m, IsTag tag) =>
     (forall tag'. IsTag tag' => Constraints tag' -> m (MetaTypeAST tag')) ->
     SchemeBinders -> f tag -> Unwrap m f -> m (MetaTypeAST tag)
-instantiateBinders replaceSkolem (SchemeBinders typeVars recordVars sumVars) typ unwrap =
+instantiateBinders replaceSkolem (SchemeBinders typeVars recordVars variantVars) typ unwrap =
     {-# SCC "instantiate" #-}
     do
-        typeUFs   <- {-# SCC "instantiate.freshtvs"  #-}traverse replaceSkolem typeVars
-        recordUFs <- {-# SCC "instantiate.freshrtvs" #-}traverse replaceSkolem recordVars
-        sumUFs    <- {-# SCC "instantiate.freshstvs" #-}traverse replaceSkolem sumVars
+        typeUFs    <- {-# SCC "instantiate.freshtvs"  #-}traverse replaceSkolem typeVars
+        recordUFs  <- {-# SCC "instantiate.freshrtvs" #-}traverse replaceSkolem recordVars
+        variantUFs <- {-# SCC "instantiate.freshstvs" #-}traverse replaceSkolem variantVars
         let go :: IntMap (MetaTypeAST t) -> Type.AST t f -> m (MetaTypeAST t)
             go binders (Type.TSkolem (Type.TVarName i)) = return (binders IntMap.! i)
             go _ typeAST =
                 Type.ntraverse
                 (unwrap (go typeUFs))
                 (unwrap (go recordUFs))
-                (unwrap (go sumUFs)) typeAST <&> MetaTypeAST
+                (unwrap (go variantUFs)) typeAST <&> MetaTypeAST
         let goTop =
                 case tagRefl :: ASTTagEquality tag of
                 IsTypeT -> go typeUFs
                 IsCompositeT IsRecordC -> go recordUFs
-                IsCompositeT IsSumC -> go sumUFs
+                IsCompositeT IsVariantC -> go variantUFs
         unwrap goTop typ
 
 -- | Convert a Scheme's bound/quantified variables to meta-variables
