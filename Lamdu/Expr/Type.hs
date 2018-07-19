@@ -9,9 +9,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Lamdu.Expr.Type
     ( Type, Composite
-    , TVarName(..)
+    , TVarName(..), _TVarName
     , AST(..)
       , _TFun, _TInst, _TRecord, _TVariant, _TSkolem
       , _TEmptyComposite, _TCompositeExtend
@@ -35,7 +36,7 @@ import           Text.PrettyPrint.HughesPJClass (Pretty(..), maybeParens)
 
 import           Prelude.Compat
 
-newtype TVarName (tag :: ASTTag) = TVarName { _tVarName :: Int }
+newtype TVarName (tag :: ASTTag) = TVarName Int
     deriving (Eq, Ord, Show, NFData)
 
 instance Pretty (TVarName tag) where
@@ -178,3 +179,5 @@ instance (Pretty (ast 'TypeT),
             ( case compositeTagRefl :: CompositeTagEquality c of
               IsRecordC -> pPrintPrec level 1 r
               IsVariantC    -> pPrintPrec level 1 r )
+
+Lens.makePrisms ''TVarName

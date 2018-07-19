@@ -38,7 +38,7 @@ tvarBindersToList :: TVarBinders tag -> [(Type.TVarName tag, Constraints tag)]
 tvarBindersToList = map (_1 %~ Type.TVarName) . IntMap.toList
 
 tvarBindersFromList :: [(Type.TVarName tag, Constraints tag)] -> TVarBinders tag
-tvarBindersFromList = IntMap.fromList . map (_1 %~ Type._tVarName)
+tvarBindersFromList = IntMap.fromList . map (_1 %~ (^. Type._TVarName))
 
 data SchemeBinders = SchemeBinders
     { schemeTypeBinders :: TVarBinders 'TypeT
