@@ -63,12 +63,12 @@ library
                      , NamedFieldPuns
                      , KindSignatures
                      , FlexibleInstances
-  build-depends:       base >=4.10 && <4.12
+  build-depends:       base >=4.10
                      , deepseq >=1.4 && <1.5
-                     , lens >=4.16 && <4.17
+                     , lens >=4.16
                      , vector >=0.12 && <0.13
                      , base-compat >=0.10 && <0.11
-                     , containers >=0.5 && <0.6
+                     , containers >=0.5
                      , pretty >=1.1 && <1.2
                      , bytestring >=0.10 && <0.11
                      , binary >=0.8 && <0.9

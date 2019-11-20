@@ -5,6 +5,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NoMonadFailDesugaring #-}
 module Lamdu.Infer
     ( Infer, infer, inferScheme
     , unifyType

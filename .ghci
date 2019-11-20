@@ -4,6 +4,6 @@
 :set -isrc
 :set -itest
 :set -idist/build/autogen
-:set -Wall -Widentities -Wmissing-home-modules -Wincomplete-patterns -Wnoncanonical-monad-instances -Wsemigroup -Wincomplete-record-updates -Wimplicit-prelude -Wredundant-constraints
+:set -Wall -Widentities -Wmissing-home-modules -Wincomplete-patterns -Wnoncanonical-monad-instances -Wsemigroup -Wincomplete-record-updates -Wimplicit-prelude -Wredundant-constraints -XNoMonadFailDesugaring
 :set -odir=ghci-out
 :set -outputdir=ghci-out
